@@ -223,6 +223,15 @@ lint_sql() {
     { ((${#concurrent[@]} == 0)) || node_modules/.bin/squawk "${concurrent[@]}"; }
 }
 
+migrations_append_only() {
+  local changed
+  changed="$(git diff --name-only --diff-filter=DMRT origin/main...HEAD -- supabase/migrations)" || return
+  [[ -z "${changed}" ]] || {
+    printf 'These migrations are on main, so a database may have applied them already.\n%s\n' "${changed}" >&2
+    return 1
+  }
+}
+
 run_check "bans" "Suppression and exclusion ban" \
   "Remove each suppression or exclusion listed above and fix what it hid." no_banned_patterns
 run_check "" "Exclusion keys in deno.json" "Remove the keys listed above." no_config_exclusions
@@ -236,6 +245,8 @@ run_check "types" "Type check" "Fix the type errors above." "${deno}" check
 run_check "100% typed, awaited promises" "Type coverage and floating promises" \
   "Give each value listed above a type without any, and await each promise listed above." type_coverage
 run_check "squawk" "SQL lint" "Fix the squawk findings above." lint_sql
+run_check "append-only migrations" "Migrations on main stay unchanged" \
+  "Restore each migration listed above and put the change in a new migration." migrations_append_only
 run_check "audit" "Dependency audit of deno.lock and bun.lock" \
   "Upgrade each package named above, then rerun." audit_dependencies
 run_check "" "Tests with 100% line, branch and function coverage" \
