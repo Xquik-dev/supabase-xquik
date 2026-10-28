@@ -16,3 +16,7 @@
 - Fail the checks on any Supabase advisor finding.
 - Add foreign tables in the `xquik` schema for public reads, through the
   Supabase Wrappers OpenAPI FDW.
+- Fail the checks when the mutation score of the TypeScript sources and the SQL
+  functions drops below a minimum.
+- Add fast-check property tests for the webhook signature check, the secret
+  list, the `askDocs` answers and the SQL quoting.

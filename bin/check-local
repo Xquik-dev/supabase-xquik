@@ -245,6 +245,19 @@ passed+=("${tests_passed:+${tests_passed} }tests at 100% coverage")
 run_check "CodeQL" "Static analysis with the CodeQL security-extended queries" \
   "Fix the CodeQL findings above, then rerun." run_codeql
 
+mutation_minimum="76.43"
+
+mutation_tests() {
+  local listing files=()
+  listing="$(git ls-files --cached --others --exclude-standard -- '*.ts' 'supabase/migrations/*.sql' \
+    ':(exclude)*_test.ts' ':(exclude)*.d.ts')" || return
+  mapfile -t files <<<"${listing}"
+  "${deno}" run --allow-read --allow-write --allow-run --allow-env scripts/mutate.ts "${mutation_minimum}" "${files[@]}"
+}
+
+run_check "mutation score ${mutation_minimum}%" "Mutation tests of every TypeScript source and SQL function" \
+  "Add a test that fails on each surviving mutant listed above." mutation_tests
+
 current_check="Final tree check"
 if [[ -n "${status_commit}" ]]; then
   head_commit="$(git rev-parse HEAD)"
