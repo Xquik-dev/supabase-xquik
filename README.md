@@ -168,11 +168,12 @@ Your webhook URL is `https://your-project-ref.supabase.co/functions/v1/xquik-web
 deno task check
 deno task test
 XQUIK_WEBHOOK_SECRET=your_webhook_secret deno task test:stack
+supabase test db
 deno task generate
 deno task types
 ```
 
-`deno task test` proves that every operation in `openapi.json` has a tested path. It also proves that every event type gets a receiver result. The SQL tests check each foreign table against `openapi.json`. `deno task test:stack` runs against `supabase start`. `deno task generate` rebuilds the operation list and the foreign tables from `openapi.json`. `deno task types` regenerates `supabase/functions/_shared/database.types.ts` from `supabase start`. `bin/check-local` installs the pinned Deno with Bun. Then it runs the checks and tests.
+`deno task test` proves that every operation in `openapi.json` has a tested path. It also proves that every event type gets a receiver result. The SQL tests check each foreign table against `openapi.json`. They also run the pgTAP tests in `supabase/tests/database`, which check the tables, row level security, policies, functions, grants and indexes. `supabase test db` runs the same pgTAP tests on `supabase start`. `deno task test:stack` runs against `supabase start`. `deno task generate` rebuilds the operation list and the foreign tables from `openapi.json`. `deno task types` regenerates `supabase/functions/_shared/database.types.ts` from `supabase start`. `bin/check-local` installs the pinned Deno with Bun. Then it runs the checks and tests.
 
 ## Documentation
 
