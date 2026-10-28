@@ -161,6 +161,10 @@ lint_shell() {
   shellcheck --norc --check-sourced --enable=all --extended-analysis=true --severity=style "${files[@]}"
 }
 
+audit_dependencies() {
+  "${deno}" audit && bun audit
+}
+
 lint_sql() {
   git ls-files -z -- '*.sql' | xargs -0 -r node_modules/.bin/squawk --assume-in-transaction
 }
@@ -177,6 +181,8 @@ run_check "lint" "Lint" "Fix the lint findings above." "${deno}" lint
 run_check "types" "Type check" "Fix the type errors above." "${deno}" check
 run_check "100% type coverage" "Type coverage" "Give each value listed above a type without any." type_coverage
 run_check "squawk" "SQL lint" "Fix the squawk findings above." lint_sql
+run_check "audit" "Dependency audit of deno.lock and bun.lock" \
+  "Upgrade each package named above, then rerun." audit_dependencies
 run_check "" "Tests with 100% line, branch and function coverage" \
   "Fix the failing tests, or test the lines, branches and functions listed above." run_tests
 tests_passed="$(sed -nE 's/^ok \| ([0-9]+) passed.*/\1/p' "${workspace}/tests.log" | tail -n 1)"
