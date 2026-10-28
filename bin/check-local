@@ -167,7 +167,8 @@ audit_dependencies() {
 
 run_codeql() {
   local source="${workspace}/codeql-source" database="${workspace}/codeql-database"
-  local results="${workspace}/codeql-results.sarif" diagnostic="js/diagnostics/extraction-errors" unread count
+  local results="${workspace}/codeql-results.sarif" diagnostic="js/diagnostics/extraction-errors"
+  local unread tracked extracted skipped count
   mkdir "${source}" &&
     git ls-files -z --cached --others --exclude-standard | tar --null -T - -cf - | tar -xf - -C "${source}" &&
     codeql database create "${database}" --language=javascript --build-mode=none --source-root="${source}" \
@@ -186,6 +187,17 @@ run_codeql() {
     echo "CodeQL could not parse ${unread}, so the scan is incomplete." >&2
     return 1
   }
+  tracked="$(git ls-files --cached --others --exclude-standard -- '*.ts')" || return
+  extracted="$(jq -r '.runs[].invocations[]?.toolExecutionNotifications[]?
+    | select(.descriptor.id == "js/diagnostics/successfully-extracted-files")
+    | .locations[0].physicalLocation.artifactLocation.uri' "${results}")" || return
+  skipped="$(awk -v extracted="${extracted}" '
+    BEGIN { count = split(extracted, names, "\n"); for (i = 1; i <= count; i++) read[names[i]] = 1 }
+    !($0 in read)' <<<"${tracked}")" || return
+  [[ -z "${skipped}" ]] || {
+    printf 'CodeQL did not extract these files, so the scan cannot vouch for them.\n%s\n' "${skipped}" >&2
+    return 1
+  }
   count="$(jq '[.runs[].results[]?] | length' "${results}")" || return
   ((count == 0)) || {
     jq -r '.runs[].results[] | .locations[0].physicalLocation as $at
@@ -193,7 +205,7 @@ run_codeql() {
     echo "CodeQL found ${count} results." >&2
     return 1
   }
-  echo "CodeQL found no results."
+  echo "CodeQL read every tracked TypeScript file and found no results."
 }
 
 lint_sql() {
