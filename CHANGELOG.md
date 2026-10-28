@@ -16,3 +16,6 @@
 - Fail the checks on any Supabase advisor finding.
 - Add foreign tables in the `xquik` schema for public reads, through the
   Supabase Wrappers OpenAPI FDW.
+- Fail the checks on a secret anywhere in the git history or a broken Markdown
+  link. Fail them on prose that breaks the `.vale` styles, a complex function or
+  duplicated code.

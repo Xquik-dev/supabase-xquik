@@ -1,0 +1,17 @@
+Apify
+cron
+Deno
+gitleaks
+jq
+nonces
+npm
+Packagist
+pg_cron
+pg_net
+Postgres
+repos
+shellcheck
+Supabase
+uv
+Xquik
+xquik\.com

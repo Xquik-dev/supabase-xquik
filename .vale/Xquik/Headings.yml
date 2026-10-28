@@ -1,0 +1,11 @@
+extends: capitalization
+message: "Write '%s' in sentence case."
+level: error
+match: $sentence
+scope: heading
+exceptions:
+  - Edge Functions?
+  - Supabase
+  - Twitter
+  - X
+  - Xquik
