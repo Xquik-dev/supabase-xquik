@@ -94,7 +94,7 @@ Deno.test("the Supabase stack", async (t) => {
         assertEquals(
           properties,
           {
-            definer: true,
+            definer: name !== "response_body",
             config: ['search_path=""'],
             owner: "postgres",
             anon: false,
