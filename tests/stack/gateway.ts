@@ -36,6 +36,7 @@ export function gateway({ routes, keys }: GatewayConfig): (request: Request) => 
 if (import.meta.main) {
   const [json] = z.tuple([z.string()]).parse(Deno.args);
   const parsed = config.parse(JSON.parse(json));
-  const server = Deno.serve({ hostname: "127.0.0.1", port: parsed.port, onListen: () => {} }, gateway(parsed));
-  Deno.addSignalListener("SIGTERM", () => server.shutdown());
+  const stop = new AbortController();
+  Deno.addSignalListener("SIGTERM", () => stop.abort());
+  Deno.serve({ hostname: "127.0.0.1", port: parsed.port, signal: stop.signal, onListen: () => {} }, gateway(parsed));
 }

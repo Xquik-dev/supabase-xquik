@@ -23,11 +23,15 @@ async function ownLink(prepare: (link: string) => Promise<void>): Promise<Outcom
 }
 
 Deno.test("own-link makes the link when nothing is at its path", async () => {
-  assertEquals(await ownLink(() => Promise.resolve()), { success: true, points: "<dir>/target", planted: null });
+  assertEquals(await ownLink(async () => {
+    await Promise.resolve();
+  }), { success: true, points: "<dir>/target", planted: null });
 });
 
 Deno.test("own-link points a link this user owns at the target", async () => {
-  assertEquals(await ownLink((link) => Deno.symlink("/elsewhere", link)), {
+  assertEquals(await ownLink(async (link) => {
+    await Deno.symlink("/elsewhere", link);
+  }), {
     success: true,
     points: "<dir>/target",
     planted: null,
@@ -35,7 +39,9 @@ Deno.test("own-link points a link this user owns at the target", async () => {
 });
 
 Deno.test("own-link refuses a planted file and leaves it unchanged", async () => {
-  assertEquals(await ownLink((link) => Deno.writeTextFile(link, "planted")), {
+  assertEquals(await ownLink(async (link) => {
+    await Deno.writeTextFile(link, "planted");
+  }), {
     success: false,
     points: null,
     planted: "planted",
@@ -43,5 +49,7 @@ Deno.test("own-link refuses a planted file and leaves it unchanged", async () =>
 });
 
 Deno.test("own-link refuses a planted directory and leaves it empty", async () => {
-  assertEquals(await ownLink((link) => Deno.mkdir(link)), { success: false, points: null, planted: [] });
+  assertEquals(await ownLink(async (link) => {
+    await Deno.mkdir(link);
+  }), { success: false, points: null, planted: [] });
 });

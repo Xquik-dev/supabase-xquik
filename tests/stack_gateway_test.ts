@@ -18,7 +18,7 @@ function upstream(): { url: string; forwarded: Forwarded[]; server: Deno.HttpSer
     });
     return new Response("answered", { status: 201 });
   });
-  return { url: `http://127.0.0.1:${server.addr.port}/`, forwarded, server };
+  return { url: `http://127.0.0.1:${String(server.addr.port)}/`, forwarded, server };
 }
 
 function config(url: string, port = 0): GatewayConfig {
@@ -91,11 +91,14 @@ Deno.test("the gateway script serves its JSON config and stops on SIGTERM", asyn
   try {
     let answer: Response | undefined;
     for (let attempt = 0; attempt < 100 && answer === undefined; attempt++) {
-      answer = await fetch(`http://127.0.0.1:${port}/rest/v1/xquik_actions`, { headers: { apikey: KEYS.publishable } })
-        .catch(() => new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 100)));
+      answer = await fetch(`http://127.0.0.1:${String(port)}/rest/v1/xquik_actions`, { headers: { apikey: KEYS.publishable } })
+        .catch(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          return undefined;
+        });
     }
     assertEquals(await answer?.text(), "answered");
-    assertEquals(forwarded.map(({ path, authorization }) => `${path} ${authorization}`), [
+    assertEquals(forwarded.map(({ path, authorization }) => `${path} ${String(authorization)}`), [
       "/xquik_actions Bearer anon-jwt",
     ]);
   } finally {
