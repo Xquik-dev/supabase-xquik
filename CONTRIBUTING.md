@@ -25,12 +25,12 @@ bin/check-local
 15. `scripts/type_coverage.ts` fails when the type of any value contains `any`. It also fails when a statement leaves a promise, a voided promise or an array of promises that no code awaits.
 16. squawk assumes a transaction, except in a file with `create index concurrently`. `supabase migration up` runs that statement alone.
 17. `deno audit` and `bun audit` check `deno.lock` and `bun.lock` for known vulnerabilities.
-18. Every test must run and pass, with no ignored test or step. The tests must run every line, branch and function of every tracked TypeScript source file, and the coverage report must measure no other file. The SQL tests apply the migrations with `supabase migration up`. They fail on any Supabase advisor finding at any level, and when `deno task types` would change `supabase/functions/_shared/database.types.ts`.
+18. Every test must run and pass, with no ignored test or step. The tests must run every line, branch and function of every tracked TypeScript source file, and the coverage report must measure no other file. The SQL tests apply the migrations with `supabase migration up`. They fail on any Supabase advisor finding at any level, and when `deno task types` would change `supabase/functions/_shared/database.types.ts`. They also run every pgTAP test in `supabase/tests` with pgTAP 1.3.4 from PGXN, and fail on a failed, skipped or todo test, or on a test count that differs from the file's plan. `lint/banned-patterns.txt` bans `skip`, `todo`, `todo_start` and `no_plan` calls.
 19. CodeQL runs its security-extended queries over the tracked files.
 
 Fix what a check finds. Never suppress a finding or narrow a check.
 
-The checks run on Linux x86_64 and need curl, shellcheck, uv, jq and CodeQL on your PATH. The SQL tests start a throwaway cluster, so they also need the Postgres 18 `initdb` and `pg_ctl`.
+The checks run on Linux x86_64 and need curl, shellcheck, uv, jq and CodeQL on your PATH. The SQL tests start a throwaway cluster, so they also need the Postgres 18 `initdb`, `pg_ctl` and `psql`, `prove` from Perl, `unzip` and access to api.pgxn.org.
 
 `deno task check` and `deno task test` give faster feedback while you work.
 

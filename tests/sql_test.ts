@@ -1,4 +1,4 @@
-import { assert, assertArrayIncludes, assertEquals, assertExists } from "@std/assert";
+import { assert, assertArrayIncludes, assertEquals, assertExists, assertMatch, assertNotMatch } from "@std/assert";
 import { Client, DatabaseError } from "pg";
 import { z } from "zod";
 import { securityRequirements } from "../scripts/openapi.ts";
@@ -34,19 +34,12 @@ const TABLES = [
   },
   { name: "public.xquik_webhook_nonces", column: "seen_at", row: "(nonce) values ('n')" },
 ];
-const FUNCTIONS = [
-  "api_key",
-  "build_request",
-  "call",
-  "collect",
-  "enqueue",
-  "queueable_request",
-  "response_body",
-  "rows",
-  "schedule",
-  "send_action",
-];
 const NO_JSON_ANSWER = ["downloadSupportAttachment", "streamEvents"];
+const PGTAP_VERSION = "1.3.4";
+const PGTAP_ARCHIVE = `https://api.pgxn.org/dist/pgtap/${PGTAP_VERSION}/pgtap-${PGTAP_VERSION}.zip`;
+const PGTAP_SHA256 = "2570574a9321082e82433768feb5bffe472ef2ced6b22608a86bfd25f2b88e40";
+const PROVE = ["--norc", "--failures", "--comments", "--directives", "--recurse", "--ext=.sql", "--ext=.pg"];
+const PSQL = "psql --no-psqlrc --no-align --quiet --tuples-only --pset=pager=off --set=ON_ERROR_STOP=1 --file";
 
 const spec = z.object({
   security: securityRequirements,
@@ -80,8 +73,25 @@ async function run(command: string, args: string[], env: Record<string, string> 
   return decoder.decode(stdout);
 }
 
+async function buildPgtap(dir: string): Promise<string> {
+  const archive = new Uint8Array(await (await fetch(PGTAP_ARCHIVE)).arrayBuffer());
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", archive));
+  assertEquals(Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(""), PGTAP_SHA256, PGTAP_ARCHIVE);
+  await Deno.writeFile(`${dir}/pgtap.zip`, archive);
+  const source = `pgtap-${PGTAP_VERSION}`;
+  await run("unzip", ["-q", `${dir}/pgtap.zip`, `${source}/pgtap.control`, `${source}/sql/pgtap.sql.in`, "-d", dir]);
+  const extension = `${dir}/pgtap/extension`;
+  await Deno.mkdir(extension, { recursive: true });
+  await Deno.copyFile(`${dir}/${source}/pgtap.control`, `${extension}/pgtap.control`);
+  const script = (await Deno.readTextFile(`${dir}/${source}/sql/pgtap.sql.in`)).replaceAll("__OS__", Deno.build.os)
+    .replaceAll("__VERSION__", PGTAP_VERSION.split(".").slice(0, 2).join("."));
+  await Deno.writeTextFile(`${extension}/pgtap--${PGTAP_VERSION}.sql`, script);
+  return `${dir}/pgtap`;
+}
+
 async function startCluster(dir: string): Promise<void> {
   const data = `${dir}/data`;
+  const pgtap = await buildPgtap(dir);
   await run("initdb", [
     "-D",
     data,
@@ -99,7 +109,7 @@ async function startCluster(dir: string): Promise<void> {
   const settings = [
     "listen_addresses = ''",
     `unix_socket_directories = '${dir}'`,
-    `extension_control_path = '${standIns}:$system'`,
+    `extension_control_path = '${standIns}:${pgtap}:$system'`,
   ];
   await Deno.writeTextFile(`${data}/postgresql.conf`, `${settings.join("\n")}\n`, { append: true });
   const log = `${dir}/server.log`;
@@ -160,16 +170,6 @@ async function testFunctions(t: Deno.TestContext, client: Client): Promise<void>
     await sql`insert into net._http_response (id, status_code, content_type, content)
       select request_id, ${status}, ${type}, ${content} from public.xquik_actions where id = ${action?.["id"]}`;
   };
-
-  await step("only service_role runs the xquik functions", async () => {
-    assertEquals(
-      await sql`select bool_or(has_function_privilege('anon', p.oid, 'execute')) as anon,
-          bool_or(has_function_privilege('authenticated', p.oid, 'execute')) as authenticated,
-          bool_and(has_function_privilege('service_role', p.oid, 'execute')) as service
-        from pg_proc p where p.pronamespace = 'xquik'::regnamespace`,
-      [{ anon: false, authenticated: false, service: true }],
-    );
-  });
 
   await step("xquik.call sends the method, URL, Vault key and JSON body with a 30 second timeout", async () => {
     await reply(201, "application/json", '{"id": "1"}');
@@ -442,16 +442,6 @@ async function testFunctions(t: Deno.TestContext, client: Client): Promise<void>
     return [...plan.matchAll(/"Index Name":"([^"]+)"/g)].map(([, name]) => String(name));
   };
 
-  await step("anon and authenticated hold no privilege on any table or sequence in public or xquik", async () => {
-    assertEquals(
-      await sql`select c.oid::regclass::text as relation, a.grantee::regrole::text as role, a.privilege_type as privilege
-        from pg_class c, aclexplode(c.relacl) a
-        where c.relnamespace in ('public'::regnamespace, 'xquik'::regnamespace)
-          and a.grantee in ('anon'::regrole, 'authenticated'::regrole)`,
-      [],
-    );
-  });
-
   await step("row level security denies anon and authenticated every operation even after a grant", async () => {
     const outcomes: Record<string, unknown>[] = [];
     for (const table of TABLES) {
@@ -487,23 +477,6 @@ async function testFunctions(t: Deno.TestContext, client: Client): Promise<void>
           added: `new row violates row-level security policy for table "${String(table.name.split(".")[1])}"`,
         }))
       ),
-    );
-  });
-
-  await step("every regular table in public and xquik carries a comment that says what it holds", async () => {
-    assertEquals(
-      await sql`select c.oid::regclass::text as relation from pg_class c
-        where c.relnamespace in ('public'::regnamespace, 'xquik'::regnamespace) and c.relkind in ('r', 'p')
-          and coalesce(obj_description(c.oid, 'pg_class'), '') = ''`,
-      [],
-    );
-  });
-
-  await step("each xquik function pins an empty search_path, and response_body runs as its caller", async () => {
-    assertEquals(
-      await sql`select p.proname as name, p.prosecdef as definer, p.proconfig as config
-        from pg_proc p where p.pronamespace = 'xquik'::regnamespace order by p.proname`,
-      FUNCTIONS.map((name) => ({ name, definer: name !== "response_body", config: ['search_path=""'] })),
     );
   });
 
@@ -657,6 +630,23 @@ async function formatted(source: string): Promise<string> {
   return new TextDecoder().decode(stdout);
 }
 
+async function testPgtap(t: Deno.TestContext, client: Client, dir: string): Promise<void> {
+  await t.step("every pgTAP test passes with no skip or todo, and each file runs exactly its plan", async () => {
+    await query(client, "create extension pgtap with schema extensions");
+    try {
+      const report = await run(
+        "prove",
+        [...PROVE, "--exec", PSQL, "supabase/tests"],
+        { PGHOST: dir, PGUSER: "postgres", PGDATABASE: "postgres", PGOPTIONS: "-c search_path=public,extensions" },
+      );
+      assertMatch(report, /^Result: PASS$/m);
+      assertNotMatch(report, /# (?:skip|todo)\b|skipped:/i);
+    } finally {
+      await query(client, "drop extension pgtap");
+    }
+  });
+}
+
 async function testCli(t: Deno.TestContext, client: Client, url: string): Promise<void> {
   await t.step("the Supabase advisors report nothing at any level", async () => {
     await query(client, "select pg_stat_force_next_flush()");
@@ -698,6 +688,7 @@ Deno.test("the SQL functions and triggers on a throwaway Postgres 18 cluster", a
       try {
         await applyMigrations(client, url);
         await testFunctions(t, client);
+        await testPgtap(t, client, dir);
         await testCli(t, client, url);
       } finally {
         await client.end();

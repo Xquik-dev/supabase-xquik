@@ -20,3 +20,6 @@
   link. Fail them on prose that breaks the `.vale` styles, a complex function or
   duplicated code.
 - Fail the checks on any oxlint finding, type-aware rules included.
+- Add pgTAP tests in `supabase/tests/database` for the tables, row level
+  security, policies, functions, grants and indexes. `bin/check-local` runs
+  them, and `supabase test db` runs them on a local stack.
