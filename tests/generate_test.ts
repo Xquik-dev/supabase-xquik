@@ -1,21 +1,28 @@
-import { assertEquals, assertMatch, assertNotEquals, assertStringIncludes, assertThrows } from "@std/assert";
+import {
+  assertEquals,
+  assertExists,
+  assertMatch,
+  assertNotEquals,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
 import { z } from "zod";
-import { foreignTables, renderForeignTables } from "../scripts/foreign_tables.ts";
+import { FOREIGN_TABLES_SUFFIX, foreignTables, renderForeignTables } from "../scripts/foreign_tables.ts";
 import { latestMigration, operationRows, REGISTRY_SUFFIX, renderMigration, SPEC_PATH } from "../scripts/generate.ts";
+import { publicOperations } from "../scripts/openapi.ts";
 
 const root: unknown = JSON.parse(await Deno.readTextFile(SPEC_PATH));
-const rows = operationRows(root);
+const operations = publicOperations(root);
+const rows = operationRows(operations);
+const tables = foreignTables(operations);
 
-Deno.test("the latest registry migration matches a fresh generation from openapi.json", async () => {
-  assertEquals(await Deno.readTextFile(latestMigration(REGISTRY_SUFFIX)), renderMigration(rows));
-});
-
-Deno.test("latestMigration names the suffix it found no migration for", () => {
-  assertThrows(
-    () => latestMigration("_missing.sql"),
-    Deno.errors.NotFound,
-    "No *_missing.sql migration in supabase/migrations",
-  );
+Deno.test("the latest registry & foreign table migrations match a fresh generation from openapi.json", async () => {
+  const fresh = { [REGISTRY_SUFFIX]: renderMigration(rows), [FOREIGN_TABLES_SUFFIX]: renderForeignTables(tables) };
+  for (const [suffix, sql] of Object.entries(fresh)) {
+    const latest = latestMigration(suffix);
+    assertExists(latest, `no *${suffix} migration`);
+    assertEquals(await Deno.readTextFile(latest), sql, suffix);
+  }
 });
 
 Deno.test("list_field names the required array that every success shape shares", () => {
@@ -40,13 +47,13 @@ Deno.test("list_field names the required array that every success shape shares",
   );
 });
 
-Deno.test("operationRows names a broken reference in openapi.json", () => {
+Deno.test("publicOperations names a broken reference in openapi.json", () => {
   const spec = {
     security: [{ apiKey: [] }],
     info: { title: "Xquik" },
     paths: { "/x": { get: { operationId: "getX", responses: { "200": { $ref: "#/info/title/deeper" } } } } },
   };
-  assertThrows(() => operationRows(spec), Error, "openapi.json has a broken reference #/info/title/deeper");
+  assertThrows(() => publicOperations(spec), Error, "openapi.json has a broken reference #/info/title/deeper");
 });
 
 Deno.test("deno task generate writes each migration once under its own stamp & reuses both while openapi.json stays the same", async () => {
@@ -73,7 +80,6 @@ Deno.test("deno task generate writes each migration once under its own stamp & r
     const lines = new TextDecoder().decode(output.stdout).trimEnd().split("\n");
     return summary.parse(lines.map((line): unknown => JSON.parse(line)));
   };
-  const tables = foreignTables(root);
   const first = await generate();
   const [registry, foreign] = first;
   assertEquals([registry.operations, registry.changed, foreign.foreignTables, foreign.changed], [
@@ -98,6 +104,7 @@ Deno.test("deno task generate writes each migration once under its own stamp & r
 Deno.test("deno task generate stops when it cannot read the migrations, so it writes no duplicate", () => {
   const root = Deno.makeTempDirSync();
   const latest = latestMigration(REGISTRY_SUFFIX);
+  assertExists(latest);
   Deno.mkdirSync(`${root}/supabase/migrations`, { recursive: true });
   Deno.copyFileSync(SPEC_PATH, `${root}/${SPEC_PATH}`);
   Deno.copyFileSync(latest, `${root}/${latest}`);

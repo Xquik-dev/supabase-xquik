@@ -1,10 +1,13 @@
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import { assertEquals, assertExists, assertStringIncludes } from "@std/assert";
 import { z } from "zod";
 import { FOREIGN_TABLES_SUFFIX, foreignTables, renderForeignTables } from "../scripts/foreign_tables.ts";
 import { latestMigration, SPEC_PATH } from "../scripts/generate.ts";
+import { publicOperations } from "../scripts/openapi.ts";
 
 const root: unknown = JSON.parse(await Deno.readTextFile(SPEC_PATH));
-const migration = await Deno.readTextFile(latestMigration(FOREIGN_TABLES_SUFFIX));
+const latest = latestMigration(FOREIGN_TABLES_SUFFIX);
+assertExists(latest);
+const migration = await Deno.readTextFile(latest);
 
 const NO_JSON_ANSWER = ["downloadSupportAttachment", "streamEvents"];
 
@@ -61,10 +64,6 @@ Deno.test("each foreign table calls its operation's path & takes every path para
   }
 });
 
-Deno.test("the latest foreign table migration matches a fresh generation from openapi.json", () => {
-  assertEquals(migration, renderForeignTables(foreignTables(root)));
-});
-
 Deno.test("list reads unwrap their list & page by their cursor, single reads keep the whole answer", () => {
   assertEquals(migrationTables.get("search_tweets")?.options, {
     endpoint: "/api/v1/x/tweets/search",
@@ -95,7 +94,7 @@ const page = {
 };
 
 Deno.test("columns follow the path item's parameters, resolve references & take the first non-null type", () => {
-  const tables = foreignTables({
+  const tables = foreignTables(publicOperations({
     security: [{ apiKey: [] }],
     components: {
       parameters: { Id: { name: "id", in: "path", schema: { type: "string" } } },
@@ -119,7 +118,7 @@ Deno.test("columns follow the path item's parameters, resolve references & take 
         },
       },
     },
-  });
+  }));
   assertEquals(tables, [{
     operationId: "getThingStats",
     table: "get_thing_stats",
@@ -141,7 +140,7 @@ Deno.test("columns follow the path item's parameters, resolve references & take 
 Deno.test("a read gets a table only when it is public & answers with JSON or a json format", () => {
   const format = (values: string[]) => ({ name: "format", in: "query", schema: { type: "string", enum: values } });
   const file = { "200": { content: { "application/octet-stream": { schema: { type: "string" } } } } };
-  const tables = foreignTables({
+  const tables = foreignTables(publicOperations({
     security: [{ oauthBearer: [] }],
     paths: {
       "/stream": { get: { operationId: "stream", security: [{ apiKey: [] }], responses: file } },
@@ -158,7 +157,7 @@ Deno.test("a read gets a table only when it is public & answers with JSON or a j
         },
       },
     },
-  });
+  }));
   assertEquals(tables, [{
     operationId: "export",
     table: "export",
@@ -176,7 +175,7 @@ Deno.test("a list read pages only when it takes a cursor & any answer shape carr
   const read = (operationId: string, parameters: unknown[], schema: unknown) => ({
     get: { operationId, parameters, responses: jsonAnswer(schema) },
   });
-  const tables = foreignTables({
+  const tables = foreignTables(publicOperations({
     security: [{}],
     components: { schemas: { Page: page } },
     paths: {
@@ -188,7 +187,7 @@ Deno.test("a list read pages only when it takes a cursor & any answer shape carr
       "/d": read("noCursorInAnswer", [cursor], { ...page, properties: { items: { type: "array" } } }),
       "/e": read("pagedAfterCamelCursor", [afterCursor], camelPage),
     },
-  });
+  }));
   const paged = { param: "cursor", path: "/next_cursor" };
   assertEquals(
     tables.map(({ operationId, responsePath, cursor }) => ({ operationId, responsePath, cursor })),

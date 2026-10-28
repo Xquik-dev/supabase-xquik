@@ -44,15 +44,19 @@ const schemaNode = z.object({
   anyOf: z.array(z.unknown()).default([]),
 });
 
-export type Parameter = z.infer<typeof parameter>;
-export type SchemaNode = z.infer<typeof schemaNode>;
+export type Parameter = {
+  readonly name: string;
+  readonly in: z.infer<typeof parameter>["in"];
+  readonly type: string | null;
+  readonly enum: readonly unknown[];
+};
 
 export type Operation = {
   readonly operationId: string;
   readonly method: Method;
   readonly path: string;
   readonly parameters: readonly Parameter[];
-  readonly json: { readonly schema: unknown } | undefined;
+  readonly json: { readonly properties: ReadonlySet<string> } | undefined;
   readonly listField: string | null;
 };
 
@@ -72,7 +76,7 @@ function resolve(root: unknown, value: unknown): unknown {
   return resolve(root, target);
 }
 
-export function schemaAt(root: unknown, value: unknown): SchemaNode {
+function schemaAt(root: unknown, value: unknown): z.infer<typeof schemaNode> {
   return schemaNode.parse(resolve(root, value));
 }
 
@@ -94,6 +98,21 @@ function firstRequiredArrayProperty(root: unknown, value: unknown): string | nul
   return first !== undefined && names.every((name) => name === first) ? first : null;
 }
 
+function propertyNames(root: unknown, value: unknown): string[] {
+  const node = schemaAt(root, value);
+  return [
+    ...Object.keys(node.properties),
+    ...[...node.allOf, ...node.oneOf, ...node.anyOf].flatMap((member) => propertyNames(root, member)),
+  ];
+}
+
+function resolveParameter(root: unknown, value: unknown): Parameter {
+  const { name, in: location, schema } = parameter.parse(resolve(root, value));
+  const node = schemaAt(root, schema);
+  const type = [node.type ?? []].flat().find((candidate) => candidate !== "null") ?? null;
+  return { name, in: location, type, enum: node.enum };
+}
+
 function isPublic(security: readonly Record<string, unknown>[]): boolean {
   return security.some((requirement) => Object.keys(requirement).length === 0 || "apiKey" in requirement);
 }
@@ -109,8 +128,8 @@ export function publicOperations(root: unknown): Operation[] {
         operationId: op.operationId,
         method,
         path,
-        parameters: [...item.parameters, ...op.parameters].map((value) => parameter.parse(resolve(root, value))),
-        json,
+        parameters: [...item.parameters, ...op.parameters].map((value) => resolveParameter(root, value)),
+        json: json === undefined ? undefined : { properties: new Set(propertyNames(root, json.schema)) },
         listField: json === undefined ? null : firstRequiredArrayProperty(root, json.schema),
       }];
     })

@@ -1,4 +1,4 @@
-import { type Operation, publicOperations, schemaAt } from "./openapi.ts";
+import type { Operation } from "./openapi.ts";
 import { identifier, literal } from "./sql.ts";
 
 export const FOREIGN_TABLES_SUFFIX = "_xquik_foreign_tables.sql";
@@ -17,39 +17,26 @@ export type ForeignTable = {
 const CURSOR_PARAMS = ["cursor", "afterCursor"];
 const CURSOR_FIELDS = ["next_cursor", "nextCursor"];
 
-const COLUMN_TYPES = new Map<string, ColumnType>([
+const COLUMN_TYPES = new Map<string | null, ColumnType>([
   ["boolean", "boolean"],
   ["integer", "bigint"],
   ["number", "double precision"],
 ]);
 
-function columnType(root: unknown, schema: unknown): ColumnType {
-  const first = [schemaAt(root, schema).type ?? []].flat().find((name) => name !== "null");
-  return COLUMN_TYPES.get(first ?? "") ?? "text";
-}
-
-function mayHaveProperty(root: unknown, value: unknown, name: string): boolean {
-  const node = schemaAt(root, value);
-  return name in node.properties ||
-    [...node.allOf, ...node.oneOf, ...node.anyOf].some((member) => mayHaveProperty(root, member, name));
-}
-
-function foreignTable(root: unknown, { operationId, path, parameters, json, listField }: Operation): ForeignTable[] {
-  const format = parameters.find((p) =>
-    p.in === "query" && p.name === "format" && schemaAt(root, p.schema).enum.includes("json")
-  );
+function foreignTable({ operationId, path, parameters, json, listField }: Operation): ForeignTable[] {
+  const format = parameters.find((p) => p.in === "query" && p.name === "format" && p.enum.includes("json"));
   if (format === undefined && json === undefined) return [];
   const columns = [
     ...parameters.filter((p) => p.in === "path"),
     ...parameters.filter((p) => p.in === "query" && p !== format),
   ];
   const cursorParam = CURSOR_PARAMS.find((name) => parameters.some((p) => p.in === "query" && p.name === name));
-  const cursorField = CURSOR_FIELDS.find((name) => json !== undefined && mayHaveProperty(root, json.schema, name));
+  const cursorField = CURSOR_FIELDS.find((name) => json !== undefined && json.properties.has(name));
   return [{
     operationId,
     table: operationId.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
     endpoint: format === undefined ? path : `${path}?format=json`,
-    columns: columns.map((p) => ({ name: p.name, type: columnType(root, p.schema) })),
+    columns: columns.map((p) => ({ name: p.name, type: COLUMN_TYPES.get(p.type) ?? "text" })),
     responsePath: listField === null ? "" : `/${listField}`,
     cursor: cursorParam === undefined || cursorField === undefined
       ? null
@@ -57,8 +44,8 @@ function foreignTable(root: unknown, { operationId, path, parameters, json, list
   }];
 }
 
-export function foreignTables(root: unknown): ForeignTable[] {
-  return publicOperations(root).filter((op) => op.method === "GET").flatMap((op) => foreignTable(root, op));
+export function foreignTables(operations: readonly Operation[]): ForeignTable[] {
+  return operations.filter((op) => op.method === "GET").flatMap(foreignTable);
 }
 
 function options(table: ForeignTable): [string, string][] {

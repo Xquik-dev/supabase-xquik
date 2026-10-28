@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertExists } from "@std/assert";
 import pg, { DatabaseError } from "pg";
 import { FOREIGN_TABLES_SUFFIX } from "../scripts/foreign_tables.ts";
 import { latestMigration, migrationFiles, REGISTRY_SUFFIX } from "../scripts/generate.ts";
@@ -38,6 +38,12 @@ async function startCluster(dir: string): Promise<void> {
 
 async function query(client: pg.Client, text: string, values: unknown[] = []): Promise<Row[]> {
   return (await client.query<Row, unknown[]>(text, values)).rows;
+}
+
+async function latestSql(suffix: string): Promise<string> {
+  const file = latestMigration(suffix);
+  assertExists(file, `no *${suffix} migration`);
+  return await Deno.readTextFile(file);
 }
 
 async function applyMigrations(client: pg.Client): Promise<void> {
@@ -368,7 +374,7 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
       values ('staleUnused', 'GET', '/unused', 'read'), ('staleUsed', 'GET', '/used', 'read')`;
       await sql`insert into public.xquik_actions (operation_id, status, request_id, finished_at)
       values ('staleUsed', 'failed', 1, now())`;
-      await query(client, await Deno.readTextFile(latestMigration(REGISTRY_SUFFIX)));
+      await query(client, await latestSql(REGISTRY_SUFFIX));
       assertEquals(
         await sql`select operation_id as operation, method, path, kind, list_field as list
         from xquik.operations where operation_id in ('getUser', 'staleUnused', 'staleUsed') order by operation_id`,
@@ -380,7 +386,7 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
     },
   );
 
-  const foreignTablesMigration = await Deno.readTextFile(latestMigration(FOREIGN_TABLES_SUFFIX));
+  const foreignTablesMigration = await latestSql(FOREIGN_TABLES_SUFFIX);
   const foreignTables = (): Promise<Row[]> =>
     sql`select c.relname as name, t.ftoptions as options,
         array(select format('%s %s', a.attname, format_type(a.atttypid, a.atttypmod)) from pg_attribute a
