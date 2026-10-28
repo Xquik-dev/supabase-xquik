@@ -214,7 +214,7 @@ lint_sql() {
 
 run_check "bans" "Suppression and exclusion ban" \
   "Remove each suppression or exclusion listed above and fix what it hid." no_banned_patterns
-run_check "config" "Exclusion keys in deno.json" "Remove the keys listed above." no_config_exclusions
+run_check "" "Exclusion keys in deno.json" "Remove the keys listed above." no_config_exclusions
 run_check "shellcheck" "Shell lint with every optional shellcheck check" "Fix the shellcheck findings above." lint_shell
 run_check "REUSE" "Licensing with REUSE lint" \
   "Give each file listed above a license and copyright in REUSE.toml or an SPDX header." \
@@ -222,7 +222,8 @@ run_check "REUSE" "Licensing with REUSE lint" \
 run_check "format" "Format check" "Run ${deno} fmt, then rerun." "${deno}" fmt --check
 run_check "lint" "Lint" "Fix the lint findings above." "${deno}" lint
 run_check "types" "Type check" "Fix the type errors above." "${deno}" check
-run_check "100% type coverage" "Type coverage" "Give each value listed above a type without any." type_coverage
+run_check "100% typed, awaited promises" "Type coverage and floating promises" \
+  "Give each value listed above a type without any, and await each promise listed above." type_coverage
 run_check "squawk" "SQL lint" "Fix the squawk findings above." lint_sql
 run_check "audit" "Dependency audit of deno.lock and bun.lock" \
   "Upgrade each package named above, then rerun." audit_dependencies

@@ -16,7 +16,7 @@ bin/check-local
 6. `deno fmt --check` checks the format.
 7. `deno lint` runs every rule that applies, plus the `lint/strict.ts` plugin. The plugin bans type assertions other than `as const`, suppression comments & comments without an https link.
 8. `deno check` checks the types with the strict compiler options in `deno.json`.
-9. `scripts/type_coverage.ts` fails when the type of any value contains `any`.
+9. `scripts/type_coverage.ts` fails when the type of any value contains `any`, or when a statement leaves a promise that no code awaits.
 10. squawk lints every SQL file.
 11. `deno audit` & `bun audit` check `deno.lock` & `bun.lock` for known vulnerabilities.
 12. The tests must pass & run every line, branch & function of every tracked source file.

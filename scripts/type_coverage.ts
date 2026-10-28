@@ -2,7 +2,12 @@ import ts from "typescript";
 import { z } from "zod";
 
 export type Site = { readonly file: string; readonly line: number; readonly column: number; readonly text: string };
-export type Report = { readonly checked: number; readonly uncovered: readonly Site[] };
+export type Report = {
+  readonly checked: number;
+  readonly uncovered: readonly Site[];
+  readonly statements: number;
+  readonly floating: readonly Site[];
+};
 
 const REMOTE_ROOT = "/deno-remote/";
 const DENO_TYPES = "/deno-types/lib.deno.d.ts";
@@ -139,6 +144,24 @@ function anyFinder(checker: ts.TypeChecker): (type: ts.Type) => boolean {
   };
 }
 
+function isThenable(checker: ts.TypeChecker, node: ts.Node): boolean {
+  const type = checker.getTypeAtLocation(node);
+  return (type.isUnion() ? type.types : [type]).some((part) => {
+    const then = part.getProperty("then");
+    return then !== undefined && checker.getTypeOfSymbolAtLocation(then, node).getCallSignatures().length > 0;
+  });
+}
+
+function expressionStatements(file: ts.SourceFile): ts.ExpressionStatement[] {
+  const statements: ts.ExpressionStatement[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isExpressionStatement(node)) statements.push(node);
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(file, visit);
+  return statements;
+}
+
 function valueNodes(file: ts.SourceFile): ts.Node[] {
   const nodes: ts.Node[] = [];
   const visit = (node: ts.Node): void => {
@@ -198,25 +221,38 @@ export async function typeCoverage(root: string, files: readonly string[]): Prom
   const checker = program.getTypeChecker();
   const hasAny = anyFinder(checker);
   let checked = 0;
+  let statements = 0;
+  const floating: Site[] = [];
   const uncovered = sources.flatMap((file) => {
     const nodes = valueNodes(file);
+    const expressions = expressionStatements(file);
     checked += nodes.length;
+    statements += expressions.length;
     const name = file.fileName.slice(root.length + 1);
+    for (const { expression } of expressions) {
+      if (isThenable(checker, expression)) floating.push(site(file, name, expression));
+    }
     return nodes.filter((node) => hasAny(checker.getTypeAtLocation(node))).map((node) => site(file, name, node));
   });
-  return { checked, uncovered };
+  return { checked, uncovered, statements, floating };
 }
 
-export function summary({ checked, uncovered }: Report): string {
+function located({ file, line, column, text }: Site): string {
+  return `${file}:${line}:${column} ${text}`;
+}
+
+export function summary({ checked, uncovered, statements, floating }: Report): string {
   const percent = checked === 0 ? 100 : ((checked - uncovered.length) / checked) * 100;
   return [
-    ...uncovered.map(({ file, line, column, text }) => `${file}:${line}:${column} ${text}`),
+    ...uncovered.map(located),
     `Type coverage is ${percent.toFixed(2)}%. ${uncovered.length} of ${checked} values have a type that contains any.`,
+    ...floating.map(located),
+    `${floating.length} of ${statements} expression statements leave a promise that no code awaits.`,
   ].join("\n");
 }
 
 if (import.meta.main) {
   const report = await typeCoverage(Deno.cwd(), Deno.args);
   console.log(summary(report));
-  if (report.uncovered.length > 0) Deno.exitCode = 1;
+  if (report.uncovered.length > 0 || report.floating.length > 0) Deno.exitCode = 1;
 }
