@@ -2,7 +2,7 @@
   "nodeModulesDir": "auto",
   "tasks": {
     "check": "deno fmt --check && deno lint && deno check && deno task type-coverage",
-    "test": "deno test --allow-read --allow-write --allow-run --allow-env tests/*_test.ts",
+    "test": "deno test --allow-read --allow-write --allow-run --allow-env --allow-net tests/*_test.ts",
     "test:stack": "deno test --allow-all tests/stack/",
     "type-coverage": "git ls-files --cached --others --exclude-standard -- '*.ts' | xargs deno run --allow-read --allow-run --allow-env scripts/type_coverage.ts",
     "generate": "deno run --allow-read=openapi.json,supabase/migrations --allow-write=supabase/migrations scripts/generate.ts"

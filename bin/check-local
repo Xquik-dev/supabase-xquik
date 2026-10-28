@@ -44,6 +44,7 @@ post_status() {
     echo "check-local: could not post the $state $status_context status. Run gh auth status." >&2
 }
 
+workspace="$(mktemp -d "${TMPDIR:-/tmp}/supabase-xquik-check-local.XXXXXX")"
 current_check="Setup"
 passed=()
 summary=""
@@ -57,6 +58,7 @@ on_exit() {
       post_status failure "Failed at $current_check."
     fi
   fi
+  rm -rf -- "${workspace:?}"
 }
 trap on_exit EXIT
 
@@ -75,7 +77,7 @@ run_check() {
     echo "check-local: $name failed. $next_step" >&2
     exit "$status"
   }
-  passed+=("$label")
+  [[ -z "$label" ]] || passed+=("$label")
 }
 
 run_check "install" "Install the locked Deno and squawk versions" \
@@ -104,6 +106,45 @@ type_coverage() {
   "$deno" run --allow-read --allow-run --allow-env scripts/type_coverage.ts "${files[@]}"
 }
 
+full_coverage() {
+  local measured
+  measured="$(git ls-files --cached --others --exclude-standard -- '*.ts' ':(exclude)*_test.ts' ':(exclude)*.d.ts')" ||
+    return
+  awk -v root="$PWD/" -v measured="$measured" '
+    BEGIN { split(measured, names, "\n"); for (i in names) wanted[names[i]] = 1 }
+    /^SF:/ {
+      file = substr($0, 4)
+      if (index(file, root) == 1) file = substr(file, length(root) + 1)
+      counted = file in wanted
+      if (counted) seen[file] = 1
+      else print "check-local: the report also measured " file ", which is not a tracked source file."
+    }
+    !counted { next }
+    /^DA:/ { split(substr($0, 4), part, ","); if (part[2] == 0) print file ":" part[1] " has a line that no test runs." }
+    /^BRDA:/ { split(substr($0, 6), part, ","); if (part[4] == "-" || part[4] == 0) print file ":" part[1] " has a branch that no test takes." }
+    /^FNDA:/ { split(substr($0, 6), part, ","); if (part[1] == 0) print file " has the function " part[2] ", which no test calls." }
+    /^LF:/ { lines += substr($0, 4) }
+    /^LH:/ { lines_hit += substr($0, 4) }
+    /^BRF:/ { branches += substr($0, 5) }
+    /^BRH:/ { branches_hit += substr($0, 5) }
+    /^FNF:/ { functions += substr($0, 5) }
+    /^FNH:/ { functions_hit += substr($0, 5) }
+    END {
+      for (file in wanted) if (!(file in seen)) { print file " is missing from the coverage report."; missing = 1 }
+      printf "Tests cover %d of %d lines, %d of %d branches and %d of %d functions.\n",
+        lines_hit, lines, branches_hit, branches, functions_hit, functions
+      exit missing || lines_hit != lines || branches_hit != branches || functions_hit != functions
+    }' "$1"
+}
+
+run_tests() {
+  local coverage="$workspace/coverage"
+  NO_COLOR=1 DENO_COVERAGE_DIR="$coverage" "$deno" test --allow-read --allow-write --allow-run --allow-env --allow-net \
+    --coverage="$coverage" tests/*_test.ts 2>&1 | tee "$workspace/tests.log" &&
+    "$deno" coverage --lcov --output="$workspace/lcov.info" "$coverage" > /dev/null &&
+    full_coverage "$workspace/lcov.info"
+}
+
 lint_sql() {
   git ls-files -z -- '*.sql' | xargs -0 -r node_modules/.bin/squawk --assume-in-transaction
 }
@@ -116,7 +157,10 @@ run_check "lint" "Lint" "Fix the lint findings above." "$deno" lint
 run_check "types" "Type check" "Fix the type errors above." "$deno" check
 run_check "type coverage" "Type coverage" "Give each value listed above a type without any." type_coverage
 run_check "squawk" "SQL lint" "Fix the squawk findings above." lint_sql
-run_check "tests" "Tests" "Fix the failing tests above." "$deno" test --allow-read --allow-write --allow-run --allow-env tests/*_test.ts
+run_check "" "Tests with 100% line, branch and function coverage" \
+  "Fix the failing tests, or test the lines, branches and functions listed above." run_tests
+tests_passed="$(sed -nE 's/^ok \| ([0-9]+) passed.*/\1/p' "$workspace/tests.log" | tail -n 1)"
+passed+=("${tests_passed:+$tests_passed }tests at 100% coverage")
 
 current_check="Final tree check"
 if [[ -n "$status_commit" ]]; then
