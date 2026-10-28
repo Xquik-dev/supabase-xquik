@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import pg, { DatabaseError } from "pg";
+import { FOREIGN_TABLES_SUFFIX } from "../scripts/foreign_tables.ts";
 import { latestMigration, migrationFiles, operationRows, REGISTRY_SUFFIX, SPEC_PATH } from "../scripts/generate.ts";
 
 type Row = Record<string, unknown>;
@@ -399,6 +400,49 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
       );
     },
   );
+
+  const foreignTablesMigration = await Deno.readTextFile(latestMigration(FOREIGN_TABLES_SUFFIX));
+  const foreignTables = (): Promise<Row[]> =>
+    sql`select c.relname as name, t.ftoptions as options,
+        array(select format('%s %s', a.attname, format_type(a.atttypid, a.atttypmod)) from pg_attribute a
+          where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped order by a.attnum) as columns
+      from pg_foreign_table t join pg_class c on c.oid = t.ftrelid
+      where c.relnamespace = 'xquik'::regnamespace order by c.relname`;
+
+  await step(
+    "rerunning the foreign tables migration rebuilds changed tables, drops stale ones and keeps the rest",
+    async () => {
+      const fresh = await foreignTables();
+      await sql`create view public.nasa_profile as select attrs from xquik.get_user where id = 'NASA'`;
+      await sql`alter server xquik_server options (set max_pages '50')`;
+      await sql`alter foreign table xquik.search_tweets options (set endpoint '/old')`;
+      await sql`alter foreign table xquik.list_draws add column extra text`;
+      await sql`create foreign table xquik.stale_read (attrs jsonb) server xquik_server options (endpoint '/stale')`;
+      await query(client, foreignTablesMigration);
+      assertEquals(await foreignTables(), fresh);
+      assertEquals(await sql`select count(*)::int as views from pg_views where viewname = 'nasa_profile'`, [{
+        views: 1,
+      }]);
+      assertEquals(
+        await sql`select option_value as pages from pg_options_to_table(
+          (select srvoptions from pg_foreign_server where srvname = 'xquik_server')) where option_name = 'max_pages'`,
+        [{ pages: "50" }],
+      );
+    },
+  );
+
+  await step("a view on a changed foreign table stops the foreign tables migration until you drop it", async () => {
+    const fresh = await foreignTables();
+    await sql`create view public.nasa_posts as select attrs from xquik.search_tweets where q = 'NASA'`;
+    await sql`alter foreign table xquik.search_tweets options (set endpoint '/old')`;
+    assertEquals(await failure(() => query(client, foreignTablesMigration)), {
+      message: "cannot drop foreign table xquik.search_tweets because other objects depend on it",
+      hint: "Use DROP ... CASCADE to drop the dependent objects too.",
+    });
+    await sql`drop view public.nasa_posts`;
+    await query(client, foreignTablesMigration);
+    assertEquals(await foreignTables(), fresh);
+  });
 }
 
 Deno.test("the SQL functions and triggers on a throwaway Postgres 18 cluster", async (t) => {

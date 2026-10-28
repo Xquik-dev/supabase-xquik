@@ -30,7 +30,7 @@ const snakeCase = (id: string): string => id.replace(/[A-Z]/g, (letter) => `_${l
 
 const migrationTables = new Map(
   [...migration.matchAll(
-    /^create foreign table xquik\.(\w+) \(\n((?: {2}.+\n)+)\)\n {2}server xquik_server\n {2}options \((.+)\);$/gm,
+    /^create foreign table if not exists xquik\.(\w+) \(\n((?: {2}.+\n)+)\)\n {2}server xquik_server\n {2}options \((.+)\);$/gm,
   )]
     .map(([, name = "", columns = "", options = ""]) =>
       [name, {
@@ -217,7 +217,12 @@ Deno.test("rendered tables quote column names, escape literals & leave out an ab
   }]);
   assertStringIncludes(
     sql,
-    `create foreign table xquik.get_quote (
+    `          ('get_quote', array['endpoint=/quotes/{id}?tag=''a''', 'response_path='], array['page"Size bigint', 'attrs jsonb'])
+        ) wanted (name, options, columns)`,
+  );
+  assertStringIncludes(
+    sql,
+    `create foreign table if not exists xquik.get_quote (
   "page""Size" bigint,
   attrs jsonb
 )

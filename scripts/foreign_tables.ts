@@ -61,18 +61,29 @@ export function foreignTables(root: unknown): ForeignTable[] {
   return publicOperations(root).filter((op) => op.method === "GET").flatMap((op) => foreignTable(root, op));
 }
 
-function renderTable(table: ForeignTable): string {
-  const columns = [...table.columns.map((column) => `${identifier(column.name)} ${column.type}`), "attrs jsonb"];
-  const options = Object.entries({
+function options(table: ForeignTable): [string, string][] {
+  return Object.entries({
     endpoint: table.endpoint,
     response_path: table.responsePath,
     ...(table.cursor === null ? {} : { cursor_param: table.cursor.param, cursor_path: table.cursor.path }),
   });
-  return `create foreign table xquik.${table.table} (
+}
+
+function renderShape(table: ForeignTable): string {
+  const columns = [...table.columns.map((column) => `${column.name} ${column.type}`), "attrs jsonb"];
+  const settings = options(table).map(([name, value]) => `${name}=${value}`);
+  return `          (${literal(table.table)}, array[${settings.map(literal).join(", ")}], array[${
+    columns.map(literal).join(", ")
+  }])`;
+}
+
+function renderTable(table: ForeignTable): string {
+  const columns = [...table.columns.map((column) => `${identifier(column.name)} ${column.type}`), "attrs jsonb"];
+  return `create foreign table if not exists xquik.${table.table} (
 ${columns.map((column) => `  ${column}`).join(",\n")}
 )
   server xquik_server
-  options (${options.map(([name, value]) => `${name} ${literal(value)}`).join(", ")});
+  options (${options(table).map(([name, value]) => `${name} ${literal(value)}`).join(", ")});
 `;
 }
 
@@ -80,24 +91,35 @@ export function renderForeignTables(tables: readonly ForeignTable[]): string {
   return `set local lock_timeout = '5s';
 set local statement_timeout = '1min';
 
-create extension if not exists wrappers with schema extensions;
-
-drop foreign data wrapper if exists xquik_wrapper cascade;
-create foreign data wrapper xquik_wrapper
-  handler extensions.wasm_fdw_handler
-  validator extensions.wasm_fdw_validator;
-
-create server xquik_server
-  foreign data wrapper xquik_wrapper
-  options (
-    fdw_package_url 'https://github.com/supabase/wrappers/releases/download/wasm_openapi_fdw_v0.2.1/openapi_fdw.wasm',
-    fdw_package_name 'supabase:openapi-fdw',
-    fdw_package_version '0.2.1',
-    fdw_package_checksum '12c902f3089e18142a1d8d35c66b9ceb85c193224229687bd929aff6b44cddde',
-    base_url 'https://xquik.com',
-    api_key_id 'xquik_api_key',
-    api_key_header 'x-api-key',
-    max_pages '10'
-  );
+do $$
+declare
+  stale record;
+begin
+  for stale in
+    select c.relname as name
+    from pg_foreign_table t
+    join pg_class c on c.oid = t.ftrelid
+    join pg_foreign_server s on s.oid = t.ftserver
+    where c.relnamespace = 'xquik'::regnamespace and s.srvname = 'xquik_server'
+      and not exists (
+        select from (values
+${tables.map(renderShape).join(",\n")}
+        ) wanted (name, options, columns)
+        where (wanted.name, wanted.options, wanted.columns) = (
+          c.relname::text,
+          t.ftoptions,
+          array(
+            select format('%s %s', a.attname, format_type(a.atttypid, a.atttypmod))
+            from pg_attribute a
+            where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
+            order by a.attnum
+          )
+        )
+      )
+  loop
+    execute format('drop foreign table xquik.%I', stale.name);
+  end loop;
+end
+$$;
 ${tables.map((table) => `\n${renderTable(table)}`).join("")}`;
 }
