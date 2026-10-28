@@ -448,6 +448,15 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
     );
   });
 
+  await step("every table in public and xquik carries a comment that says what it holds", async () => {
+    assertEquals(
+      await sql`select c.oid::regclass::text as relation from pg_class c
+        where c.relnamespace in ('public'::regnamespace, 'xquik'::regnamespace) and c.relkind in ('r', 'p')
+          and coalesce(obj_description(c.oid, 'pg_class'), '') = ''`,
+      [],
+    );
+  });
+
   await step("each xquik function pins an empty search_path, and response_body runs as its caller", async () => {
     assertEquals(
       await sql`select p.proname as name, p.prosecdef as definer, p.proconfig as config
