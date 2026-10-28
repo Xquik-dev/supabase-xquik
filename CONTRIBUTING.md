@@ -19,7 +19,7 @@ bin/check-local
 9. REUSE 6.2.0 checks that every file has a license and a copyright. `REUSE.toml` gives them to each file without an SPDX header.
 10. `deno fmt --check` checks the format.
 11. `deno lint` runs every rule that applies, plus the `lint/strict.ts` plugin. The plugin bans each type assertion except `as const`, and each comment that has no `https` link.
-12. fallow fails on any function over the complexity limits in `.fallowrc.json`, and on any duplicated code, across TypeScript and JavaScript too.
+12. fallow fails on any function over the limits in `.fallowrc.json`. It also fails on duplicated code, including clones between TypeScript and JavaScript.
 13. `deno check` checks the types with the strict compiler options in `deno.json`.
 14. `scripts/type_coverage.ts` fails when the type of any value contains `any`. It also fails when a statement leaves a promise, a voided promise or an array of promises that no code awaits.
 15. squawk assumes a transaction, except in a file with `create index concurrently`. `supabase migration up` runs that statement alone.

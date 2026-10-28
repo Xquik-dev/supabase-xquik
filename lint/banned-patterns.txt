@@ -6,6 +6,8 @@
 [n]ode:coverage\s+(?:ignore|disable)
 (?:[e]s|[o]x)lint-disable
 [p]rettier-ignore
+[f]allow-ignore
+<!--\s*[v]ale\s
 [s]quawk-(?:ignore|disable)
 #\s*[s]hellcheck\s+disable
 ^\s*[d]isable\s*=

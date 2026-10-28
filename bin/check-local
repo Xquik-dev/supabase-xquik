@@ -253,6 +253,10 @@ TOOLS
 }
 
 scan_secrets() {
+  [[ ! -e .gitleaksignore ]] || {
+    echo "gitleaks reads .gitleaksignore whatever its flags say. Remove the file and fix each finding it hid." >&2
+    return 1
+  }
   printf '[extend]\nuseDefault = true\n' >"${workspace}/gitleaks.toml" && mkdir "${workspace}/gitleaks-ignore" &&
     "${workspace}/bin/gitleaks" git --config="${workspace}/gitleaks.toml" \
       --gitleaks-ignore-path="${workspace}/gitleaks-ignore" --ignore-gitleaks-allow --max-archive-depth=8 \
@@ -260,9 +264,14 @@ scan_secrets() {
 }
 
 check_links() {
-  git ls-files --cached --others --exclude-standard -- '*.md' |
-    "${workspace}/bin/lychee" --offline --no-progress --include-fragments=full --include-verbatim --include-mail \
-      --files-from -
+  [[ ! -e .lycheeignore ]] || {
+    echo "lychee reads .lycheeignore whatever its flags say. Remove the file and fix each link it hid." >&2
+    return 1
+  }
+  : >"${workspace}/lychee.toml" &&
+    git ls-files --cached --others --exclude-standard -- '*.md' |
+    "${workspace}/bin/lychee" --config="${workspace}/lychee.toml" --offline --no-progress --include-fragments=full \
+      --include-verbatim --include-mail --files-from -
 }
 
 lint_prose() {
@@ -327,5 +336,6 @@ if [[ -n "${status_commit}" ]]; then
   }
 fi
 printf -v joined '%s, ' "${passed[@]}"
-summary="${joined%, }."
+echo "The checks were ${joined%, }."
+summary="${#passed[@]} checks with ${tests_passed:+${tests_passed} }tests at 100% coverage."
 echo "All local checks passed. They were ${summary}"
