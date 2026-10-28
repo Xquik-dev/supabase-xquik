@@ -89,12 +89,21 @@ Deno.test("the latest foreign table migration matches a fresh generation from op
   assertEquals(migration, renderForeignTables(foreignTables(root)));
 });
 
-Deno.test("list reads unwrap their list & page by next_cursor, single reads keep the whole answer", () => {
+Deno.test("list reads unwrap their list & page by their cursor, single reads keep the whole answer", () => {
   assertEquals(migrationTables.get("search_tweets")?.options, {
     endpoint: "/api/v1/x/tweets/search",
     response_path: "/tweets",
+    cursor_param: "cursor",
     cursor_path: "/next_cursor",
   });
+  assertEquals(migrationTables.get("list_draws")?.options, {
+    endpoint: "/api/v1/draws",
+    response_path: "/draws",
+    cursor_param: "cursor",
+    cursor_path: "/nextCursor",
+  });
+  assertEquals(migrationTables.get("list_drafts")?.options["cursor_param"], "afterCursor");
+  assertEquals(migrationTables.get("list_drafts")?.options["cursor_path"], "/nextCursor");
   assertEquals(migrationTables.get("get_user")?.options, { endpoint: "/api/v1/x/users/{id}", response_path: "" });
   assertEquals(migrationTables.get("export_draw"), {
     columns: ['"id" text', '"type" text', "attrs jsonb"],
@@ -149,7 +158,7 @@ Deno.test("columns follow the path item's parameters, resolve references & take 
       { name: "nothing", type: "text" },
     ],
     responsePath: "",
-    cursorPath: null,
+    cursor: null,
   }]);
 });
 
@@ -180,12 +189,14 @@ Deno.test("a read gets a table only when it is public & answers with JSON or a j
     endpoint: "/exports/{id}?format=json",
     columns: [{ name: "id", type: "text" }],
     responsePath: "",
-    cursorPath: null,
+    cursor: null,
   }]);
 });
 
-Deno.test("a list read pages by next_cursor only when it takes a cursor & any answer shape carries one", () => {
+Deno.test("a list read pages only when it takes a cursor & any answer shape carries the next one", () => {
   const cursor = { name: "cursor", in: "query", schema: { type: "string" } };
+  const afterCursor = { name: "afterCursor", in: "query", schema: { type: "string" } };
+  const camelPage = { ...page, properties: { items: { type: "array" }, nextCursor: { type: "string" } } };
   const read = (operationId: string, parameters: unknown[], schema: unknown) => ({
     get: { operationId, parameters, responses: jsonAnswer(schema) },
   });
@@ -199,15 +210,22 @@ Deno.test("a list read pages by next_cursor only when it takes a cursor & any an
       "/a": read("pagedThroughAnyOf", [cursor], { anyOf: [{ type: "object" }, page] }),
       "/c": read("noCursorParameter", [], page),
       "/d": read("noCursorInAnswer", [cursor], { ...page, properties: { items: { type: "array" } } }),
+      "/e": read("pagedAfterCamelCursor", [afterCursor], camelPage),
     },
   });
+  const paged = { param: "cursor", path: "/next_cursor" };
   assertEquals(
-    tables.map(({ operationId, responsePath, cursorPath }) => ({ operationId, responsePath, cursorPath })),
+    tables.map(({ operationId, responsePath, cursor }) => ({ operationId, responsePath, cursor })),
     [
-      { operationId: "noCursorInAnswer", responsePath: "/items", cursorPath: null },
-      { operationId: "noCursorParameter", responsePath: "/items", cursorPath: null },
-      { operationId: "pagedThroughAnyOf", responsePath: "", cursorPath: "/next_cursor" },
-      { operationId: "pagedThroughOneOf", responsePath: "/items", cursorPath: "/next_cursor" },
+      { operationId: "noCursorInAnswer", responsePath: "/items", cursor: null },
+      { operationId: "noCursorParameter", responsePath: "/items", cursor: null },
+      {
+        operationId: "pagedAfterCamelCursor",
+        responsePath: "/items",
+        cursor: { param: "afterCursor", path: "/nextCursor" },
+      },
+      { operationId: "pagedThroughAnyOf", responsePath: "", cursor: paged },
+      { operationId: "pagedThroughOneOf", responsePath: "/items", cursor: paged },
     ],
   );
 });
@@ -219,7 +237,7 @@ Deno.test("rendered tables quote column names, escape literals & leave out an ab
     endpoint: "/quotes/{id}?tag='a'",
     columns: [{ name: 'page"Size', type: "bigint" }],
     responsePath: "",
-    cursorPath: null,
+    cursor: null,
   }]);
   assertStringIncludes(
     sql,

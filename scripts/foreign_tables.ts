@@ -11,8 +11,11 @@ export type ForeignTable = {
   readonly endpoint: string;
   readonly columns: readonly { readonly name: string; readonly type: ColumnType }[];
   readonly responsePath: string;
-  readonly cursorPath: string | null;
+  readonly cursor: { readonly param: string; readonly path: string } | null;
 };
+
+const CURSOR_PARAMS = ["cursor", "afterCursor"];
+const CURSOR_FIELDS = ["next_cursor", "nextCursor"];
 
 const COLUMN_TYPES = new Map<string, ColumnType>([
   ["boolean", "boolean"],
@@ -77,8 +80,8 @@ function foreignTable(
     ...parameters.filter((p) => p.in === "path"),
     ...parameters.filter((p) => p.in === "query" && p !== format),
   ];
-  const takesCursor = parameters.some((p) => p.in === "query" && p.name === "cursor");
-  const returnsCursor = json !== undefined && mayHaveProperty(root, json.schema, "next_cursor");
+  const cursorParam = CURSOR_PARAMS.find((name) => parameters.some((p) => p.in === "query" && p.name === name));
+  const cursorField = CURSOR_FIELDS.find((name) => json !== undefined && mayHaveProperty(root, json.schema, name));
   const field = listField(root, op.responses);
   return {
     operationId: op.operationId,
@@ -86,7 +89,9 @@ function foreignTable(
     endpoint: format === undefined ? path : `${path}?format=json`,
     columns: columns.map((p) => ({ name: p.name, type: columnType(root, p.schema) })),
     responsePath: field === null ? "" : `/${field}`,
-    cursorPath: takesCursor && returnsCursor ? "/next_cursor" : null,
+    cursor: cursorParam === undefined || cursorField === undefined
+      ? null
+      : { param: cursorParam, path: `/${cursorField}` },
   };
 }
 
@@ -110,7 +115,7 @@ function renderTable(table: ForeignTable): string {
   const options = Object.entries({
     endpoint: table.endpoint,
     response_path: table.responsePath,
-    ...(table.cursorPath === null ? {} : { cursor_path: table.cursorPath }),
+    ...(table.cursor === null ? {} : { cursor_param: table.cursor.param, cursor_path: table.cursor.path }),
   });
   return `create foreign table xquik.${table.table} (
 ${columns.map((column) => `  ${column}`).join(",\n")}
@@ -141,7 +146,6 @@ create server xquik_server
     base_url 'https://xquik.com',
     api_key_id 'xquik_api_key',
     api_key_header 'x-api-key',
-    cursor_param 'cursor',
     max_pages '10'
   );
 ${tables.map((table) => `\n${renderTable(table)}`).join("")}`;

@@ -18,7 +18,6 @@ create server xquik_server
     base_url 'https://xquik.com',
     api_key_id 'xquik_api_key',
     api_key_header 'x-api-key',
-    cursor_param 'cursor',
     max_pages '10'
   );
 
@@ -96,7 +95,7 @@ create foreign table xquik.find_communities (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/communities/find', response_path '/communities', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/communities/find', response_path '/communities', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_account (
   attrs jsonb
@@ -151,7 +150,7 @@ create foreign table xquik.get_all_community_tweets (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/communities/tweets', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/communities/tweets', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_article (
   "tweetId" text,
@@ -215,7 +214,7 @@ create foreign table xquik.get_bookmark_folders (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/bookmarks/folders', response_path '/folders', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/bookmarks/folders', response_path '/folders', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_bookmarks (
   "folderId" text,
@@ -223,7 +222,7 @@ create foreign table xquik.get_bookmarks (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/bookmarks', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/bookmarks', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_broadcast (
   "id" text,
@@ -297,7 +296,7 @@ create foreign table xquik.get_community_media (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/communities/{id}/media', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/communities/{id}/media', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_community_members (
   "id" text,
@@ -326,7 +325,7 @@ create foreign table xquik.get_community_members (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/communities/{id}/members', response_path '/users', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/communities/{id}/members', response_path '/users', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_community_moderators (
   "id" text,
@@ -354,7 +353,7 @@ create foreign table xquik.get_community_moderators (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/communities/{id}/moderators', response_path '/users', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/communities/{id}/moderators', response_path '/users', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_community_notes_contributor (
   "alias" text,
@@ -420,7 +419,7 @@ create foreign table xquik.get_community_tweets (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/communities/{id}/tweets', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/communities/{id}/tweets', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_credit_topup_status (
   "session_id" text,
@@ -443,7 +442,7 @@ create foreign table xquik.get_dm_history (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/dm/{userId}/history', response_path '/messages', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/dm/{userId}/history', response_path '/messages', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_draft (
   "id" text,
@@ -478,7 +477,7 @@ create foreign table xquik.get_extraction (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/extractions/{id}', response_path '/results');
+  options (endpoint '/api/v1/extractions/{id}', response_path '/results', cursor_param 'cursor', cursor_path '/nextCursor');
 
 create foreign table xquik.get_followers_you_know (
   "id" text,
@@ -507,7 +506,7 @@ create foreign table xquik.get_followers_you_know (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/users/{id}/followers-you-know', response_path '/users', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/users/{id}/followers-you-know', response_path '/users', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_football_box_score (
   "league" text,
@@ -630,7 +629,7 @@ create foreign table xquik.get_list_followers (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/lists/{id}/followers', response_path '/users', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/lists/{id}/followers', response_path '/users', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_list_members (
   "id" text,
@@ -662,7 +661,7 @@ create foreign table xquik.get_list_members (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/lists/{id}/members', response_path '/users', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/lists/{id}/members', response_path '/users', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_list_tweets (
   "id" text,
@@ -728,7 +727,7 @@ create foreign table xquik.get_list_tweets (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/lists/{id}/tweets', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/lists/{id}/tweets', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_monitor (
   "id" text,
@@ -743,7 +742,7 @@ create foreign table xquik.get_notifications (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/notifications', response_path '/notifications', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/notifications', response_path '/notifications', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_popular_communities (
   "topicId" text,
@@ -755,7 +754,7 @@ create foreign table xquik.get_popular_communities (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/communities/popular', response_path '/communities', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/communities/popular', response_path '/communities', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_post_monitor (
   "id" text,
@@ -811,7 +810,7 @@ create foreign table xquik.get_similar_users (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/users/{id}/similar', response_path '/users', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/users/{id}/similar', response_path '/users', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_space (
   "id" text,
@@ -852,7 +851,7 @@ create foreign table xquik.get_sports_game_posts (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/sports/{league}/games/{id}/posts', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/sports/{league}/games/{id}/posts', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_style (
   "id" text,
@@ -890,7 +889,7 @@ create foreign table xquik.get_timeline (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/timeline', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/timeline', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_top_tweets (
   "metric" text,
@@ -904,7 +903,7 @@ create foreign table xquik.get_top_tweets (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/tweets/top', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/tweets/top', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_trends (
   "woeid" bigint,
@@ -956,7 +955,7 @@ create foreign table xquik.get_tweet_favoriters (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/tweets/{id}/favoriters', response_path '/users', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/tweets/{id}/favoriters', response_path '/users', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_tweet_hidden_replies (
   "id" text,
@@ -1003,7 +1002,7 @@ create foreign table xquik.get_tweet_hidden_replies (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/tweets/{id}/hidden-replies', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/tweets/{id}/hidden-replies', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_tweet_insights (
   "id" text,
@@ -1079,7 +1078,7 @@ create foreign table xquik.get_tweet_quotes (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/tweets/{id}/quotes', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/tweets/{id}/quotes', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_tweet_replies (
   "id" text,
@@ -1138,7 +1137,7 @@ create foreign table xquik.get_tweet_replies (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/tweets/{id}/replies', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/tweets/{id}/replies', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_tweet_repost_check (
   "id" text,
@@ -1157,7 +1156,7 @@ create foreign table xquik.get_tweet_retweeter_ids (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/tweets/{id}/retweeter-ids', response_path '/ids', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/tweets/{id}/retweeter-ids', response_path '/ids', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_tweet_retweeters (
   "id" text,
@@ -1188,7 +1187,7 @@ create foreign table xquik.get_tweet_retweeters (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/tweets/{id}/retweeters', response_path '/users', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/tweets/{id}/retweeters', response_path '/users', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_tweet_subtitles (
   "id" text,
@@ -1244,7 +1243,7 @@ create foreign table xquik.get_tweet_thread (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/tweets/{id}/thread', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/tweets/{id}/thread', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_user (
   "id" text,
@@ -1282,7 +1281,7 @@ create foreign table xquik.get_user_affiliates (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/users/{id}/affiliates', response_path '/users', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/users/{id}/affiliates', response_path '/users', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_user_articles (
   "id" text,
@@ -1329,7 +1328,7 @@ create foreign table xquik.get_user_articles (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/users/{id}/articles', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/users/{id}/articles', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_user_follower_ids (
   "id" text,
@@ -1338,7 +1337,7 @@ create foreign table xquik.get_user_follower_ids (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/users/{id}/follower-ids', response_path '/ids', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/users/{id}/follower-ids', response_path '/ids', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_user_followers (
   "id" text,
@@ -1372,7 +1371,7 @@ create foreign table xquik.get_user_followers (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/users/{id}/followers', response_path '/users', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/users/{id}/followers', response_path '/users', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_user_following (
   "id" text,
@@ -1406,7 +1405,7 @@ create foreign table xquik.get_user_following (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/users/{id}/following', response_path '/users', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/users/{id}/following', response_path '/users', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_user_following_ids (
   "id" text,
@@ -1415,7 +1414,7 @@ create foreign table xquik.get_user_following_ids (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/users/{id}/following-ids', response_path '/ids', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/users/{id}/following-ids', response_path '/ids', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_user_highlights (
   "id" text,
@@ -1462,7 +1461,7 @@ create foreign table xquik.get_user_highlights (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/users/{id}/highlights', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/users/{id}/highlights', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_user_insights (
   "id" text,
@@ -1518,7 +1517,7 @@ create foreign table xquik.get_user_likes (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/users/{id}/likes', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/users/{id}/likes', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_user_list_memberships (
   "id" text,
@@ -1529,7 +1528,7 @@ create foreign table xquik.get_user_list_memberships (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/users/{id}/list-memberships', response_path '/lists', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/users/{id}/list-memberships', response_path '/lists', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_user_lists (
   "id" text,
@@ -1540,7 +1539,7 @@ create foreign table xquik.get_user_lists (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/users/{id}/lists', response_path '/lists', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/users/{id}/lists', response_path '/lists', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_user_live_status (
   "id" text,
@@ -1596,7 +1595,7 @@ create foreign table xquik.get_user_media (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/users/{id}/media', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/users/{id}/media', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_user_mentions (
   "id" text,
@@ -1645,7 +1644,7 @@ create foreign table xquik.get_user_mentions (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/users/{id}/mentions', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/users/{id}/mentions', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_user_replies (
   "id" text,
@@ -1711,7 +1710,7 @@ create foreign table xquik.get_user_replies (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/users/{id}/replies', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/users/{id}/replies', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_user_subscriptions (
   "id" text,
@@ -1740,7 +1739,7 @@ create foreign table xquik.get_user_subscriptions (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/users/{id}/subscriptions', response_path '/users', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/users/{id}/subscriptions', response_path '/users', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_user_tweets (
   "id" text,
@@ -1807,7 +1806,7 @@ create foreign table xquik.get_user_tweets (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/users/{id}/tweets', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/users/{id}/tweets', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_user_verified_followers (
   "id" text,
@@ -1841,7 +1840,7 @@ create foreign table xquik.get_user_verified_followers (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/users/{id}/verified-followers', response_path '/users', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/users/{id}/verified-followers', response_path '/users', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.get_write_action_status (
   "id" text,
@@ -1917,7 +1916,7 @@ create foreign table xquik.get_x_trends_history (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/trends/history', response_path '/snapshots', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/trends/history', response_path '/snapshots', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.list_community_notes_contributor_deleted_notes (
   "alias" text,
@@ -1928,7 +1927,7 @@ create foreign table xquik.list_community_notes_contributor_deleted_notes (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/community-notes/contributors/{alias}/deleted-notes', response_path '/notes', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/community-notes/contributors/{alias}/deleted-notes', response_path '/notes', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.list_community_notes_contributor_notes (
   "alias" text,
@@ -1939,7 +1938,7 @@ create foreign table xquik.list_community_notes_contributor_notes (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/community-notes/contributors/{alias}/notes', response_path '/notes', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/community-notes/contributors/{alias}/notes', response_path '/notes', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.list_drafts (
   "limit" bigint,
@@ -1947,7 +1946,7 @@ create foreign table xquik.list_drafts (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/drafts', response_path '/drafts');
+  options (endpoint '/api/v1/drafts', response_path '/drafts', cursor_param 'afterCursor', cursor_path '/nextCursor');
 
 create foreign table xquik.list_draws (
   "limit" bigint,
@@ -1955,7 +1954,7 @@ create foreign table xquik.list_draws (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/draws', response_path '/draws');
+  options (endpoint '/api/v1/draws', response_path '/draws', cursor_param 'cursor', cursor_path '/nextCursor');
 
 create foreign table xquik.list_events (
   "limit" bigint,
@@ -1967,7 +1966,7 @@ create foreign table xquik.list_events (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/events', response_path '/events');
+  options (endpoint '/api/v1/events', response_path '/events', cursor_param 'cursor', cursor_path '/nextCursor');
 
 create foreign table xquik.list_extractions (
   "limit" bigint,
@@ -1977,7 +1976,7 @@ create foreign table xquik.list_extractions (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/extractions', response_path '/extractions');
+  options (endpoint '/api/v1/extractions', response_path '/extractions', cursor_param 'cursor', cursor_path '/nextCursor');
 
 create foreign table xquik.list_football_games (
   "league" text,
@@ -1997,7 +1996,7 @@ create foreign table xquik.list_keyword_monitors (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/monitors/keywords', response_path '/monitors');
+  options (endpoint '/api/v1/monitors/keywords', response_path '/monitors', cursor_param 'cursor', cursor_path '/nextCursor');
 
 create foreign table xquik.list_monitors (
   "limit" bigint,
@@ -2005,7 +2004,7 @@ create foreign table xquik.list_monitors (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/monitors', response_path '/monitors');
+  options (endpoint '/api/v1/monitors', response_path '/monitors', cursor_param 'cursor', cursor_path '/nextCursor');
 
 create foreign table xquik.list_post_monitors (
   "limit" bigint,
@@ -2013,7 +2012,7 @@ create foreign table xquik.list_post_monitors (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/monitors/posts', response_path '/monitors');
+  options (endpoint '/api/v1/monitors/posts', response_path '/monitors', cursor_param 'cursor', cursor_path '/nextCursor');
 
 create foreign table xquik.list_styles (
   "limit" bigint,
@@ -2021,7 +2020,7 @@ create foreign table xquik.list_styles (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/styles', response_path '/styles');
+  options (endpoint '/api/v1/styles', response_path '/styles', cursor_param 'cursor', cursor_path '/nextCursor');
 
 create foreign table xquik.list_tickets (
   "limit" bigint,
@@ -2029,7 +2028,7 @@ create foreign table xquik.list_tickets (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/support/tickets', response_path '/tickets');
+  options (endpoint '/api/v1/support/tickets', response_path '/tickets', cursor_param 'cursor', cursor_path '/nextCursor');
 
 create foreign table xquik.list_webhook_deliveries (
   "id" text,
@@ -2038,7 +2037,7 @@ create foreign table xquik.list_webhook_deliveries (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/webhooks/{id}/deliveries', response_path '/deliveries');
+  options (endpoint '/api/v1/webhooks/{id}/deliveries', response_path '/deliveries', cursor_param 'cursor', cursor_path '/nextCursor');
 
 create foreign table xquik.list_webhooks (
   "limit" bigint,
@@ -2046,7 +2045,7 @@ create foreign table xquik.list_webhooks (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/webhooks', response_path '/webhooks');
+  options (endpoint '/api/v1/webhooks', response_path '/webhooks', cursor_param 'cursor', cursor_path '/nextCursor');
 
 create foreign table xquik.list_x_accounts (
   "limit" bigint,
@@ -2054,7 +2053,7 @@ create foreign table xquik.list_x_accounts (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/accounts', response_path '/accounts');
+  options (endpoint '/api/v1/x/accounts', response_path '/accounts', cursor_param 'cursor', cursor_path '/nextCursor');
 
 create foreign table xquik.lookup_tweet (
   "id" text,
@@ -2121,7 +2120,7 @@ create foreign table xquik.search_communities (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/communities/search', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/communities/search', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.search_community_members (
   "id" text,
@@ -2166,7 +2165,7 @@ create foreign table xquik.search_jobs (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/jobs/search', response_path '/jobs', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/jobs/search', response_path '/jobs', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.search_lists (
   "q" text,
@@ -2177,7 +2176,7 @@ create foreign table xquik.search_lists (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/lists/search', response_path '/lists', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/lists/search', response_path '/lists', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.search_spaces (
   "q" text,
@@ -2189,7 +2188,7 @@ create foreign table xquik.search_spaces (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/spaces/search', response_path '/spaces', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/spaces/search', response_path '/spaces', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.search_tweets (
   "q" text,
@@ -2255,7 +2254,7 @@ create foreign table xquik.search_tweets (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/tweets/search', response_path '/tweets', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/tweets/search', response_path '/tweets', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.search_users (
   "q" text,
@@ -2285,7 +2284,7 @@ create foreign table xquik.search_users (
   attrs jsonb
 )
   server xquik_server
-  options (endpoint '/api/v1/x/users/search', response_path '/users', cursor_path '/next_cursor');
+  options (endpoint '/api/v1/x/users/search', response_path '/users', cursor_param 'cursor', cursor_path '/next_cursor');
 
 create foreign table xquik.search_x_places (
   "q" text,
