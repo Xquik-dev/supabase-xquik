@@ -3,45 +3,49 @@
 # SPDX-License-Identifier: Apache-2.0
 set -euo pipefail
 
-runner="$(git -C "$(dirname "$0")/.." config --get checklocal.runner || true)"
-if [[ -n "$runner" && "${CHECK_LOCAL_HERE:-}" != 1 ]]; then
-  exec "$runner" "$(cd "$(dirname "$0")/.." && pwd -P)" "$@"
+script_directory="$(dirname "$0")"
+root="$(cd "${script_directory}/.." && pwd -P)"
+runner="$(git -C "${root}" config --get checklocal.runner || true)"
+if [[ -n "${runner}" && "${CHECK_LOCAL_HERE:-}" != 1 ]]; then
+  exec "${runner}" "${root}" "$@"
 fi
 
-cd "$(dirname "$0")/.."
+cd "${root}"
 
 repository="Xquik-dev/supabase-xquik"
 status_context="xquik-local-checks"
 
 post_commit_status=true
 for argument in "$@"; do
-  case "$argument" in
+  case "${argument}" in
     --no-status) post_commit_status=false ;;
     *)
-      echo "check-local: unknown option $argument. Use --no-status or no option." >&2
+      echo "check-local: unknown option ${argument}. Use --no-status or no option." >&2
       exit 2
       ;;
   esac
 done
 
 status_commit=""
-if ! $post_commit_status; then
+head_commit="$(git rev-parse HEAD)"
+tree_changes="$(git status --porcelain)"
+if ! ${post_commit_status}; then
   echo "==> Commit status not posted because --no-status was passed."
 elif ! command -v gh >/dev/null; then
   echo "==> Commit status not posted because the GitHub CLI is not installed."
-elif [[ -n "$(git status --porcelain)" ]]; then
+elif [[ -n "${tree_changes}" ]]; then
   echo "==> Commit status not posted because the tree has uncommitted changes."
-elif ! gh api --silent "repos/$repository/commits/$(git rev-parse HEAD)" >/dev/null 2>&1; then
+elif ! gh api --silent "repos/${repository}/commits/${head_commit}" >/dev/null 2>&1; then
   echo "==> Commit status not posted because GitHub does not have HEAD, or gh is signed out. Push first."
 else
-  status_commit="$(git rev-parse HEAD)"
+  status_commit="${head_commit}"
 fi
 
 post_status() {
   local state="$1" description="${2:0:139}"
-  gh api --silent "repos/$repository/statuses/$status_commit" \
-    -f state="$state" -f context="$status_context" -f description="$description" >/dev/null 2>&1 ||
-    echo "check-local: could not post the $state $status_context status. Run gh auth status." >&2
+  gh api --silent "repos/${repository}/statuses/${status_commit}" \
+    -f state="${state}" -f context="${status_context}" -f description="${description}" >/dev/null 2>&1 ||
+    echo "check-local: could not post the ${state} ${status_context} status. Run gh auth status." >&2
 }
 
 workspace="$(mktemp -d "${TMPDIR:-/tmp}/supabase-xquik-check-local.XXXXXX")"
@@ -51,33 +55,33 @@ summary=""
 
 on_exit() {
   local status=$?
-  if [[ -n "$status_commit" ]]; then
-    if ((status == 0)) && [[ -n "$summary" ]]; then
-      post_status success "Passed $summary"
+  if [[ -n "${status_commit}" ]]; then
+    if ((status == 0)) && [[ -n "${summary}" ]]; then
+      post_status success "Passed ${summary}"
     else
-      post_status failure "Failed at $current_check."
+      post_status failure "Failed at ${current_check}."
     fi
   fi
   rm -rf -- "${workspace:?}"
 }
 trap on_exit EXIT
 
-if [[ -n "$status_commit" ]]; then
-  echo "==> Posting a pending $status_context status to ${status_commit:0:12}."
-  post_status pending "Running install, format, lint, type check & tests."
+if [[ -n "${status_commit}" ]]; then
+  echo "==> Posting a pending ${status_context} status to ${status_commit:0:12}."
+  post_status pending "Running the checks in bin/check-local."
 fi
 
 run_check() {
   local label="$1" name="$2" next_step="$3"
   shift 3
-  current_check="$name"
-  echo "==> $name"
+  current_check="${name}"
+  echo "==> ${name}"
   "$@" || {
     local status=$?
-    echo "check-local: $name failed. $next_step" >&2
-    exit "$status"
+    echo "check-local: ${name} failed. ${next_step}" >&2
+    exit "${status}"
   }
-  [[ -z "$label" ]] || passed+=("$label")
+  [[ -z "${label}" ]] || passed+=("${label}")
 }
 
 run_check "install" "Install the locked Deno and squawk versions" \
@@ -94,23 +98,24 @@ no_config_exclusions() {
   local found
   found="$(jq -r 'paths | select(.[-1] == "exclude" or .[-1] == "include" or .[-1] == "ignore")
     | select(. != ["lint", "rules", "include"]) | map(tostring) | join(".")' deno.json)" || return
-  [[ -z "$found" ]] || {
-    printf 'deno.json narrows a check with these keys.\n%s\n' "$found" >&2
+  [[ -z "${found}" ]] || {
+    printf 'deno.json narrows a check with these keys.\n%s\n' "${found}" >&2
     return 1
   }
 }
 
 type_coverage() {
-  local files=()
-  mapfile -t files < <(git ls-files --cached --others --exclude-standard -- '*.ts')
-  "$deno" run --allow-read --allow-run --allow-env scripts/type_coverage.ts "${files[@]}"
+  local listing files=()
+  listing="$(git ls-files --cached --others --exclude-standard -- '*.ts')" || return
+  mapfile -t files <<<"${listing}"
+  "${deno}" run --allow-read --allow-run --allow-env scripts/type_coverage.ts "${files[@]}"
 }
 
 full_coverage() {
   local measured
   measured="$(git ls-files --cached --others --exclude-standard -- '*.ts' ':(exclude)*_test.ts' ':(exclude)*.d.ts')" ||
     return
-  awk -v root="$PWD/" -v measured="$measured" '
+  awk -v root="${PWD}/" -v measured="${measured}" '
     BEGIN { split(measured, names, "\n"); for (i in names) wanted[names[i]] = 1 }
     /^SF:/ {
       file = substr($0, 4)
@@ -138,11 +143,21 @@ full_coverage() {
 }
 
 run_tests() {
-  local coverage="$workspace/coverage"
-  NO_COLOR=1 DENO_COVERAGE_DIR="$coverage" "$deno" test --allow-read --allow-write --allow-run --allow-env --allow-net \
-    --coverage="$coverage" tests/*_test.ts 2>&1 | tee "$workspace/tests.log" &&
-    "$deno" coverage --lcov --output="$workspace/lcov.info" "$coverage" > /dev/null &&
-    full_coverage "$workspace/lcov.info"
+  local coverage="${workspace}/coverage"
+  NO_COLOR=1 DENO_COVERAGE_DIR="${coverage}" "${deno}" test --allow-read --allow-write --allow-run --allow-env --allow-net \
+    --coverage="${coverage}" tests/*_test.ts 2>&1 | tee "${workspace}/tests.log" &&
+    "${deno}" coverage --lcov --output="${workspace}/lcov.info" "${coverage}" > /dev/null &&
+    full_coverage "${workspace}/lcov.info"
+}
+
+lint_shell() {
+  local listing files=()
+  listing="$({
+    git ls-files --cached --others --exclude-standard -- '*.sh' '*.bash' &&
+      { git grep -lIE --untracked '^#!.*sh( |$)' -- ':(exclude,glob)**/?*.*' || (($? == 1)); }
+  } | sort -u)" || return
+  mapfile -t files <<<"${listing}"
+  shellcheck --norc --check-sourced --enable=all --extended-analysis=true --severity=style "${files[@]}"
 }
 
 lint_sql() {
@@ -152,23 +167,26 @@ lint_sql() {
 run_check "banned patterns" "Suppression and exclusion ban" \
   "Remove each suppression or exclusion listed above and fix what it hid." no_banned_patterns
 run_check "config" "Exclusion keys in deno.json" "Remove the keys listed above." no_config_exclusions
-run_check "format" "Format check" "Run $deno fmt, then rerun." "$deno" fmt --check
-run_check "lint" "Lint" "Fix the lint findings above." "$deno" lint
-run_check "types" "Type check" "Fix the type errors above." "$deno" check
-run_check "type coverage" "Type coverage" "Give each value listed above a type without any." type_coverage
+run_check "shellcheck" "Shell lint with every optional shellcheck check" "Fix the shellcheck findings above." lint_shell
+run_check "format" "Format check" "Run ${deno} fmt, then rerun." "${deno}" fmt --check
+run_check "lint" "Lint" "Fix the lint findings above." "${deno}" lint
+run_check "types" "Type check" "Fix the type errors above." "${deno}" check
+run_check "100% type coverage" "Type coverage" "Give each value listed above a type without any." type_coverage
 run_check "squawk" "SQL lint" "Fix the squawk findings above." lint_sql
 run_check "" "Tests with 100% line, branch and function coverage" \
   "Fix the failing tests, or test the lines, branches and functions listed above." run_tests
-tests_passed="$(sed -nE 's/^ok \| ([0-9]+) passed.*/\1/p' "$workspace/tests.log" | tail -n 1)"
-passed+=("${tests_passed:+$tests_passed }tests at 100% coverage")
+tests_passed="$(sed -nE 's/^ok \| ([0-9]+) passed.*/\1/p' "${workspace}/tests.log" | tail -n 1)"
+passed+=("${tests_passed:+${tests_passed} }tests at 100% coverage")
 
 current_check="Final tree check"
-if [[ -n "$status_commit" ]]; then
-  [[ "$(git rev-parse HEAD)" == "$status_commit" && -z "$(git status --porcelain)" ]] || {
+if [[ -n "${status_commit}" ]]; then
+  head_commit="$(git rev-parse HEAD)"
+  tree_changes="$(git status --porcelain)"
+  [[ "${head_commit}" == "${status_commit}" && -z "${tree_changes}" ]] || {
     echo "check-local: the tree changed during the checks. Commit or remove the changes, then rerun." >&2
     exit 1
   }
 fi
 printf -v joined '%s, ' "${passed[@]}"
 summary="${joined%, }."
-echo "All local checks passed. They were $summary"
+echo "All local checks passed. They were ${summary}"
