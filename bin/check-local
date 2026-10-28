@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Xquik Contributors
+# SPDX-License-Identifier: Apache-2.0
+set -euo pipefail
+
+runner="$(git -C "$(dirname "$0")/.." config --get checklocal.runner || true)"
+if [[ -n "$runner" && "${CHECK_LOCAL_HERE:-}" != 1 ]]; then
+  exec "$runner" "$(cd "$(dirname "$0")/.." && pwd -P)" "$@"
+fi
+
+cd "$(dirname "$0")/.."
+
+repository="Xquik-dev/supabase-xquik"
+status_context="xquik-local-checks"
+
+post_commit_status=true
+for argument in "$@"; do
+  case "$argument" in
+    --no-status) post_commit_status=false ;;
+    *)
+      echo "check-local: unknown option $argument. Use --no-status or no option." >&2
+      exit 2
+      ;;
+  esac
+done
+
+status_commit=""
+if ! $post_commit_status; then
+  echo "==> Commit status not posted because --no-status was passed."
+elif ! command -v gh >/dev/null; then
+  echo "==> Commit status not posted because the GitHub CLI is not installed."
+elif [[ -n "$(git status --porcelain)" ]]; then
+  echo "==> Commit status not posted because the tree has uncommitted changes."
+elif ! gh api --silent "repos/$repository/commits/$(git rev-parse HEAD)" >/dev/null 2>&1; then
+  echo "==> Commit status not posted because GitHub does not have HEAD, or gh is signed out. Push first."
+else
+  status_commit="$(git rev-parse HEAD)"
+fi
+
+post_status() {
+  local state="$1" description="${2:0:139}"
+  gh api --silent "repos/$repository/statuses/$status_commit" \
+    -f state="$state" -f context="$status_context" -f description="$description" >/dev/null 2>&1 ||
+    echo "check-local: could not post the $state $status_context status. Run gh auth status." >&2
+}
+
+current_check="Setup"
+passed=()
+summary=""
+
+on_exit() {
+  local status=$?
+  if [[ -n "$status_commit" ]]; then
+    if ((status == 0)) && [[ -n "$summary" ]]; then
+      post_status success "Passed $summary"
+    else
+      post_status failure "Failed at $current_check."
+    fi
+  fi
+}
+trap on_exit EXIT
+
+if [[ -n "$status_commit" ]]; then
+  echo "==> Posting a pending $status_context status to ${status_commit:0:12}."
+  post_status pending "Running install, format, lint, type check & tests."
+fi
+
+run_check() {
+  local label="$1" name="$2" next_step="$3"
+  shift 3
+  current_check="$name"
+  echo "==> $name"
+  "$@" || {
+    local status=$?
+    echo "check-local: $name failed. $next_step" >&2
+    exit "$status"
+  }
+  passed+=("$label")
+}
+
+run_check "install" "Install the locked Deno version" \
+  "Install Bun and check network access, or update bun.lock, then rerun." \
+  bun install --frozen-lockfile
+run_check "format, lint & types" "Format check, lint and type check" \
+  "Run node_modules/.bin/deno fmt, then fix the remaining findings above." \
+  node_modules/.bin/deno task check
+run_check "tests" "Tests" "Fix the failing tests above." node_modules/.bin/deno task test
+
+current_check="Final tree check"
+if [[ -n "$status_commit" ]]; then
+  [[ "$(git rev-parse HEAD)" == "$status_commit" && -z "$(git status --porcelain)" ]] || {
+    echo "check-local: the tree changed during the checks. Commit or remove the changes, then rerun." >&2
+    exit 1
+  }
+fi
+printf -v joined '%s, ' "${passed[@]}"
+summary="${joined%, }."
+echo "All local checks passed. They were $summary"
