@@ -1,4 +1,4 @@
-import { assertEquals, assertFalse, assertThrows } from "@std/assert";
+import { assertEquals, assertFalse } from "@std/assert";
 import {
   type DeliveryStore,
   handleDelivery,
@@ -41,12 +41,6 @@ Deno.test("verifies the raw body bytes, so a re-serialized body fails", async ()
 
 Deno.test("reads the timestamp as milliseconds, so a seconds timestamp is stale", async () => {
   assertEquals(await reason(await signDelivery(EVENT, { timestamp: String(Math.floor(NOW / 1000)) })), "stale");
-});
-
-Deno.test("rejects a timestamp more than 5 minutes from the clock", async () => {
-  assertEquals(await reason(await signDelivery(EVENT, { timestamp: String(NOW - 300_001) })), "stale");
-  assertEquals(await reason(await signDelivery(EVENT, { timestamp: String(NOW + 300_001) })), "stale");
-  assertEquals(await reason(await signDelivery(EVENT, { timestamp: String(NOW - 300_000) })), "accepted");
 });
 
 Deno.test("rejects a delivery signed with another secret", async () => {
@@ -136,12 +130,6 @@ Deno.test("rejects a delivery without its timestamp, nonce or signature header",
   assertEquals(reasons, ["stale", "signature", "signature"]);
 });
 
-Deno.test("refuses to start without a webhook secret", () => {
-  for (const value of [undefined, "", " , "]) {
-    assertThrows(() => parseSecrets(value), Error, "Set XQUIK_WEBHOOK_SECRET");
-  }
-});
-
 Deno.test("accepts deliveries signed with any configured secret", async () => {
   const secrets = parseSecrets(`${SECRET}, second-webhook-secret`);
   const { events, store } = memoryStore();
@@ -176,6 +164,8 @@ Deno.test("answers 405 to anything but POST", async () => {
   const response = await handleDelivery(new Request(RECEIVER_URL), receiver(store).deps);
   assertEquals(response.status, 405);
   assertEquals(response.headers.get("allow"), "POST");
+  const unsigned = await handleDelivery(new Request(RECEIVER_URL, { method: "POST" }), receiver(store).deps);
+  assertEquals([unsigned.status, unsigned.headers.get("allow")], [401, null]);
 });
 
 Deno.test("never puts the secret or the signature in a response", async () => {

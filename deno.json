@@ -13,6 +13,7 @@
     "@std/assert": "jsr:@std/assert@1",
     "@supabase/supabase-js": "npm:@supabase/supabase-js@2",
     "@types/pg": "npm:@types/pg@8",
+    "fast-check": "npm:fast-check@4",
     "pg": "npm:pg@8",
     "typescript": "npm:typescript@6.0.3",
     "x-twitter-scraper": "npm:x-twitter-scraper@0.18.0",
