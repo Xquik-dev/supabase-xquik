@@ -8,7 +8,7 @@ bin/check-local
 
 `bin/check-local` runs every check in this order. It stops at the first failure and says what to fix.
 
-1. Bun installs the Deno, squawk, fallow and TypeScript versions that `bun.lock` pins.
+1. Bun installs the packages that `bun.lock` pins.
 2. `git grep` bans each pattern in `lint/banned-patterns.txt` in every file. The list covers every suppression comment, ignore entry and skipped test.
 3. `deno.json` has no `exclude` or `ignore` key, and its 1 `include` key adds lint rules.
 4. `bin/check-local` downloads the gitleaks, lychee and vale releases it pins, and stops if a download does not match its pinned sha256.

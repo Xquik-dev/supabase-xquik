@@ -85,7 +85,7 @@ run_check() {
   [[ -z "${label}" ]] || passed+=("${label}")
 }
 
-run_check "" "Install the locked Deno and squawk versions" \
+run_check "" "Install the packages that bun.lock pins" \
   "Install Bun and check network access, or update bun.lock, then rerun." \
   bun install --frozen-lockfile
 deno=node_modules/.bin/deno
@@ -296,7 +296,7 @@ lint_code_health() {
 
 run_check "bans" "Suppression and exclusion ban" \
   "Remove each suppression or exclusion listed above and fix what it hid." no_banned_patterns
-run_check "" "Exclusion keys in deno.json" "Remove the keys listed above." no_config_exclusions
+run_check "deno.json keys" "Exclusion keys in deno.json" "Remove the keys listed above." no_config_exclusions
 run_check "" "Fetch the pinned gitleaks, lychee and vale releases" \
   "Check network access to github.com, then rerun." fetch_tools
 run_check "gitleaks" "Secret scan of the full git history with gitleaks" \
@@ -319,10 +319,9 @@ run_check "100% typed, awaited promises" "Type coverage and floating promises" \
 run_check "squawk" "SQL lint" "Fix the squawk findings above." lint_sql
 run_check "audit" "Dependency audit of deno.lock and bun.lock" \
   "Upgrade each package named above, then rerun." audit_dependencies
-run_check "" "Tests with 100% line, branch and function coverage" \
+run_check "tests" "Tests with 100% line, branch and function coverage" \
   "Fix the failing tests, run the ignored ones, or test the lines, branches and functions listed above." run_tests
 tests_passed="$(sed -nE 's/^ok \| ([0-9]+) passed.*/\1/p' "${workspace}/tests.log" | tail -n 1)"
-passed+=("${tests_passed:+${tests_passed} }tests at 100% coverage")
 run_check "CodeQL" "Static analysis with the CodeQL security-extended queries" \
   "Fix the CodeQL findings above, then rerun." run_codeql
 
