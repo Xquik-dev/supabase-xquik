@@ -40,15 +40,15 @@ type Graph = {
   readonly dependencies: ReadonlyMap<string, ReadonlyMap<string, string>>;
 };
 
-async function deno(args: readonly string[]): Promise<string> {
-  const output = await new Deno.Command(Deno.execPath(), { args: [...args], stderr: "inherit" }).output();
+async function deno(root: string, args: readonly string[]): Promise<string> {
+  const output = await new Deno.Command(Deno.execPath(), { args: [...args], cwd: root, stderr: "inherit" }).output();
   if (!output.success) throw new Error(`deno ${args[0]} failed with exit code ${output.code}.`);
   return new TextDecoder().decode(output.stdout);
 }
 
-async function moduleGraph(files: readonly string[]): Promise<Graph> {
+async function moduleGraph(root: string, files: readonly string[]): Promise<Graph> {
   const infos = await Promise.all(
-    files.map(async (file) => denoInfo.parse(JSON.parse(await deno(["info", "--json", file])))),
+    files.map(async (file) => denoInfo.parse(JSON.parse(await deno(root, ["info", "--json", file])))),
   );
   const modules = infos.flatMap((info) => info.modules);
   const redirects = new Map(infos.flatMap((info) => Object.entries(info.redirects)));
@@ -177,7 +177,7 @@ export async function typeCoverage(root: string, files: readonly string[]): Prom
     types: [],
   };
   const paths = files.map((file) => `${root}/${file}`);
-  const [graph, denoTypes] = await Promise.all([moduleGraph(paths), deno(["types"])]);
+  const [graph, denoTypes] = await Promise.all([moduleGraph(root, paths), deno(root, ["types"])]);
   const program = ts.createProgram({
     rootNames: [DENO_TYPES, ...types.map((file) => `${root}/${file}`), ...paths],
     options,

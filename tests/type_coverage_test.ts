@@ -12,9 +12,12 @@ export const parsed = Promise.resolve(JSON.parse("1"));
 export const maybe: string | Promise<unknown> = parsed;
 `;
 
-async function project(files: Record<string, string>, compilerOptions: object = { strict: true }): Promise<string> {
+async function project(
+  files: Record<string, string>,
+  config: object = { compilerOptions: { strict: true } },
+): Promise<string> {
   const root = await Deno.makeTempDir();
-  await Deno.writeTextFile(`${root}/deno.json`, JSON.stringify({ compilerOptions }));
+  await Deno.writeTextFile(`${root}/deno.json`, JSON.stringify(config));
   for (const [name, text] of Object.entries(files)) await Deno.writeTextFile(`${root}/${name}`, text);
   return root;
 }
@@ -45,16 +48,18 @@ Deno.test("resolves local, jsr and npm imports the way deno check does", async (
   );
 });
 
-Deno.test("fails when the program has a type error or a bad compiler option", async () => {
+Deno.test("fails when the program has a type error, a bad compiler option or a config deno rejects", async () => {
   const typeError = await project({ "wrong.ts": `export const count: number = "one";\n` });
   await assertRejects(
     () => typeCoverage(typeError, ["wrong.ts"]),
     Error,
     `wrong.ts:1:14 Type 'string' is not assignable to type 'number'.`,
   );
-  const badOption = await project({ "fine.ts": "export const count = 1;\n" }, { strict: "yes" });
+  const fine = { "fine.ts": "export const count = 1;\n" };
+  const badOption = await project(fine, { compilerOptions: { strict: "yes" } });
   await assertRejects(() => typeCoverage(badOption, ["fine.ts"]), Error, "Compiler option 'strict' requires");
-  await assertRejects(() => typeCoverage(badOption, ["missing.ts"]), Error, "deno info failed");
+  const badLock = await project(fine, { compilerOptions: {}, lock: 5 });
+  await assertRejects(() => typeCoverage(badLock, ["fine.ts"]), Error, "deno info failed with exit code 1.");
 });
 
 Deno.test("the command exits 1 and lists the sites only when a value has any", async () => {
