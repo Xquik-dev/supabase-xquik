@@ -1,5 +1,5 @@
-import { z } from "zod";
-import { isPublic, listField, literal, resolve } from "./generate.ts";
+import { type Operation, publicOperations, schemaAt } from "./openapi.ts";
+import { identifier, literal } from "./sql.ts";
 
 export const FOREIGN_TABLES_SUFFIX = "_xquik_foreign_tables.sql";
 
@@ -23,92 +23,43 @@ const COLUMN_TYPES = new Map<string, ColumnType>([
   ["number", "double precision"],
 ]);
 
-const securityRequirements = z.array(z.record(z.string(), z.array(z.string())));
-const document = z.object({
-  security: securityRequirements,
-  paths: z.record(z.string(), z.object({ parameters: z.array(z.unknown()).default([]), get: z.unknown().optional() })),
-});
-const operation = z.object({
-  operationId: z.string().min(1),
-  security: securityRequirements.optional(),
-  parameters: z.array(z.unknown()).default([]),
-  responses: z.record(z.string(), z.unknown()),
-});
-const parameter = z.object({
-  name: z.string().min(1),
-  in: z.enum(["path", "query", "header", "cookie"]),
-  schema: z.unknown(),
-});
-const schemaNode = z.object({
-  type: z.union([z.string(), z.array(z.string())]).optional(),
-  enum: z.array(z.unknown()).default([]),
-  properties: z.record(z.string(), z.unknown()).default({}),
-  allOf: z.array(z.unknown()).default([]),
-  oneOf: z.array(z.unknown()).default([]),
-  anyOf: z.array(z.unknown()).default([]),
-});
-const response = z.object({
-  content: z.record(z.string(), z.object({ schema: z.unknown() })).default({}),
-});
-
-type Parameter = z.infer<typeof parameter>;
-
 function columnType(root: unknown, schema: unknown): ColumnType {
-  const { type } = schemaNode.parse(resolve(root, schema));
-  const first = [type ?? []].flat().find((name) => name !== "null");
+  const first = [schemaAt(root, schema).type ?? []].flat().find((name) => name !== "null");
   return COLUMN_TYPES.get(first ?? "") ?? "text";
 }
 
 function mayHaveProperty(root: unknown, value: unknown, name: string): boolean {
-  const node = schemaNode.parse(resolve(root, value));
+  const node = schemaAt(root, value);
   return name in node.properties ||
     [...node.allOf, ...node.oneOf, ...node.anyOf].some((member) => mayHaveProperty(root, member, name));
 }
 
-function foreignTable(
-  root: unknown,
-  path: string,
-  op: z.infer<typeof operation>,
-  parameters: readonly Parameter[],
-): ForeignTable | null {
+function foreignTable(root: unknown, { operationId, path, parameters, json, listField }: Operation): ForeignTable[] {
   const format = parameters.find((p) =>
-    p.in === "query" && p.name === "format" && schemaNode.parse(resolve(root, p.schema)).enum.includes("json")
+    p.in === "query" && p.name === "format" && schemaAt(root, p.schema).enum.includes("json")
   );
-  const json = response.parse(resolve(root, op.responses["200"] ?? {})).content["application/json"];
-  if (format === undefined && json === undefined) return null;
+  if (format === undefined && json === undefined) return [];
   const columns = [
     ...parameters.filter((p) => p.in === "path"),
     ...parameters.filter((p) => p.in === "query" && p !== format),
   ];
   const cursorParam = CURSOR_PARAMS.find((name) => parameters.some((p) => p.in === "query" && p.name === name));
   const cursorField = CURSOR_FIELDS.find((name) => json !== undefined && mayHaveProperty(root, json.schema, name));
-  const field = listField(root, op.responses);
-  return {
-    operationId: op.operationId,
-    table: op.operationId.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
+  return [{
+    operationId,
+    table: operationId.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
     endpoint: format === undefined ? path : `${path}?format=json`,
     columns: columns.map((p) => ({ name: p.name, type: columnType(root, p.schema) })),
-    responsePath: field === null ? "" : `/${field}`,
+    responsePath: listField === null ? "" : `/${listField}`,
     cursor: cursorParam === undefined || cursorField === undefined
       ? null
       : { param: cursorParam, path: `/${cursorField}` },
-  };
+  }];
 }
 
 export function foreignTables(root: unknown): ForeignTable[] {
-  const spec = document.parse(root);
-  const tables = Object.entries(spec.paths).flatMap(([path, item]) => {
-    if (item.get === undefined) return [];
-    const op = operation.parse(item.get);
-    if (!isPublic(op.security ?? spec.security)) return [];
-    const parameters = [...item.parameters, ...op.parameters].map((value) => parameter.parse(resolve(root, value)));
-    const table = foreignTable(root, path, op, parameters);
-    return table === null ? [] : [table];
-  });
-  return tables.sort((a, b) => (a.operationId < b.operationId ? -1 : 1));
+  return publicOperations(root).filter((op) => op.method === "GET").flatMap((op) => foreignTable(root, op));
 }
-
-const identifier = (name: string) => `"${name.replaceAll('"', '""')}"`;
 
 function renderTable(table: ForeignTable): string {
   const columns = [...table.columns.map((column) => `${identifier(column.name)} ${column.type}`), "attrs jsonb"];

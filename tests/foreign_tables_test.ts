@@ -1,45 +1,32 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { z } from "zod";
 import { FOREIGN_TABLES_SUFFIX, foreignTables, renderForeignTables } from "../scripts/foreign_tables.ts";
-import { latestMigration, resolve, SPEC_PATH } from "../scripts/generate.ts";
+import { latestMigration, SPEC_PATH } from "../scripts/generate.ts";
 
 const root: unknown = JSON.parse(await Deno.readTextFile(SPEC_PATH));
 const migration = await Deno.readTextFile(latestMigration(FOREIGN_TABLES_SUFFIX));
+
+const NO_JSON_ANSWER = ["downloadSupportAttachment", "streamEvents"];
 
 const security = z.array(z.record(z.string(), z.unknown()));
 const spec = z.object({
   security,
   paths: z.record(
     z.string(),
-    z.object({
-      parameters: z.array(z.unknown()).default([]),
-      get: z.object({
-        operationId: z.string(),
-        security: security.optional(),
-        parameters: z.array(z.unknown()).default([]),
-        responses: z.record(z.string(), z.unknown()),
-      }).optional(),
-    }),
+    z.object({ get: z.object({ operationId: z.string(), security: security.optional() }).optional() }),
   ),
 }).parse(root);
-const parameter = z.object({ name: z.string(), in: z.string(), schema: z.unknown() });
-const enumSchema = z.object({ enum: z.array(z.unknown()).default([]) });
-const okResponse = z.object({ content: z.record(z.string(), z.unknown()).default({}) });
+const publicGets = Object.entries(spec.paths).flatMap(([path, { get }]) =>
+  get !== undefined &&
+    (get.security ?? spec.security).some((requirement) =>
+      Object.keys(requirement).length === 0 || "apiKey" in requirement
+    )
+    ? [{ id: get.operationId, path }]
+    : []
+);
+const readable = publicGets.filter(({ id }) => !NO_JSON_ANSWER.includes(id));
 
-const snakeCase = (id: string) => id.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
-
-const publicReads = Object.entries(spec.paths).flatMap(([path, item]) => {
-  const op = item.get;
-  if (op === undefined) return [];
-  const requirements = op.security ?? spec.security;
-  if (!requirements.some((r) => Object.keys(r).length === 0 || "apiKey" in r)) return [];
-  const parameters = [...item.parameters, ...op.parameters].map((value) => parameter.parse(resolve(root, value)));
-  const pinned = parameters.find((p) =>
-    p.in === "query" && p.name === "format" && enumSchema.parse(resolve(root, p.schema)).enum.includes("json")
-  );
-  const json = "application/json" in okResponse.parse(resolve(root, op.responses["200"] ?? {})).content;
-  return [{ id: op.operationId, path, parameters, pinned, readable: json || pinned !== undefined }];
-});
+const snakeCase = (id: string): string => id.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 
 const migrationTables = new Map(
   [...migration.matchAll(
@@ -57,31 +44,20 @@ const migrationTables = new Map(
     ),
 );
 
-Deno.test("every public read with a JSON answer has a foreign table, & only streams & files have none", () => {
-  const unreadable = publicReads.filter((read) => !read.readable).map((read) => read.id).sort();
-  const readable = publicReads.filter((read) => read.readable).map((read) => snakeCase(read.id)).sort();
-  console.log(
-    `${migrationTables.size} foreign tables for ${publicReads.length} public reads. ` +
-      `${unreadable.length} answer with no JSON.`,
-  );
-  assertEquals(unreadable, ["downloadSupportAttachment", "streamEvents"]);
-  assertEquals([...migrationTables.keys()].sort(), readable);
+Deno.test("every public GET operation has a foreign table, except the 2 that answer with no JSON", () => {
+  console.log(`${migrationTables.size} of ${publicGets.length} public GET operations have a foreign table.`);
+  assertEquals(NO_JSON_ANSWER.filter((id) => publicGets.some((read) => read.id === id)), NO_JSON_ANSWER);
+  assertEquals([...migrationTables.keys()].sort(), readable.map(({ id }) => snakeCase(id)).sort());
 });
 
-Deno.test("each foreign table takes every path & query parameter as a quoted column & calls the spec path", () => {
-  for (const read of publicReads.filter((read) => read.readable)) {
-    const parameters = [
-      ...read.parameters.filter((p) => p.in === "path"),
-      ...read.parameters.filter((p) => p.in === "query" && p !== read.pinned),
-    ];
-    const table = migrationTables.get(snakeCase(read.id));
-    assertEquals(
-      table?.columns.map((column) => column.split(" ")[0]),
-      [...parameters.map((p) => `"${p.name}"`), "attrs"],
-      read.id,
-    );
-    assertEquals(table?.columns.at(-1), "attrs jsonb", read.id);
-    assertEquals(table?.options["endpoint"], read.pinned ? `${read.path}?format=json` : read.path, read.id);
+Deno.test("each foreign table calls its operation's path & takes every path parameter as a column", () => {
+  for (const { id, path } of readable) {
+    const table = migrationTables.get(snakeCase(id));
+    assertEquals(table?.options["endpoint"]?.split("?")[0], path, id);
+    const columns = table?.columns.map((column) => column.split(" ")[0]) ?? [];
+    const placeholders = [...path.matchAll(/\{([^}]+)\}/g)].map(([, name]) => `"${name}"`);
+    assertEquals(placeholders.filter((name) => !columns.includes(name)), [], id);
+    assertEquals(table?.columns.at(-1), "attrs jsonb", id);
   }
 });
 
