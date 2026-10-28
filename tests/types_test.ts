@@ -7,16 +7,13 @@ const pruned = (kind: string): string =>
   `export type ${kind}<\n  Name extends\n    | { schema: keyof DatabaseWithoutInternals },\n> = Name;\n`;
 const empty = (kind: string): string => `    ${kind}: {\n      [_ in never]: never;\n    };\n`;
 
-Deno.test("withoutEmptyKinds drops the never member of each helper whose kind the public schema leaves empty", () => {
+Deno.test("withoutEmptyKinds drops the never member only from the helper of each kind the public schema leaves empty", () => {
+  const defined = `    Enums: {\n      status: "sent" | "failed";\n    };\n`;
+  const schema = empty("Views") + defined + empty("CompositeTypes");
   assertEquals(
-    withoutEmptyKinds(empty("Enums") + empty("CompositeTypes") + helper("Enums") + helper("CompositeTypes")),
-    empty("Enums") + empty("CompositeTypes") + pruned("Enums") + pruned("CompositeTypes"),
+    withoutEmptyKinds(schema + helper("Enums") + helper("CompositeTypes")),
+    schema + helper("Enums") + pruned("CompositeTypes"),
   );
-});
-
-Deno.test("withoutEmptyKinds keeps each helper whose kind the public schema defines", () => {
-  const defined = `    Enums: {\n      status: "sent" | "failed";\n    };\n` + helper("Enums");
-  assertEquals(withoutEmptyKinds(defined), defined);
 });
 
 Deno.test("scripts/types.ts rewrites each file it names", async () => {
