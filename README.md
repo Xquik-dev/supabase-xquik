@@ -39,7 +39,7 @@ Checked on 2026-10-28. See each number with its date & source on [xquik.com/trus
 - `xquik.call`, `xquik.rows`, `xquik.enqueue` & `xquik.schedule` for SQL, cron jobs & triggers.
 - Foreign tables in the `xquik` schema for public reads.
 - The `xquik-webhook` Edge Function. It checks each delivery's signature & stores each event once.
-- Each regular table has a `using (false)` or `with check (false)` policy for each operation and client role, which the advisors require.
+- Row level security on every regular table. Policies deny `anon` and `authenticated` each operation, and neither holds a grant, so only the service role reads them.
 
 ## Start everything with 1 command
 

@@ -480,7 +480,7 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
     );
   });
 
-  await step("every table in public and xquik carries a comment that says what it holds", async () => {
+  await step("every regular table in public and xquik carries a comment that says what it holds", async () => {
     assertEquals(
       await sql`select c.oid::regclass::text as relation from pg_class c
         where c.relnamespace in ('public'::regnamespace, 'xquik'::regnamespace) and c.relkind in ('r', 'p')
@@ -656,6 +656,19 @@ async function testCli(t: Deno.TestContext, client: pg.Client, url: string): Pro
   await t.step(`${TYPES} matches supabase gen types for the public schema`, async () => {
     const generated = await run(SUPABASE, ["gen", "types", "typescript", "--db-url", url, "--schema", "public"]);
     assertEquals(await Deno.readTextFile(TYPES), await formatted(generated), "Run deno task types.");
+  });
+
+  await t.step("rerunning the index migration rebuilds an index that a failed build left invalid", async () => {
+    const index = "'public.xquik_actions_operation_id'::regclass";
+    await query(client, `update pg_catalog.pg_index set indisvalid = false where indexrelid = ${index}`);
+    await query(client, "delete from supabase_migrations.schema_migrations where version = '20261028150128'");
+    await run(SUPABASE, ["migration", "up", "--include-all", "--db-url", url], { XQUIK_API_KEY: KEY["x-api-key"] });
+    assertEquals(
+      await query(client, `select indisvalid as valid from pg_catalog.pg_index where indexrelid = ${index}`),
+      [
+        { valid: true },
+      ],
+    );
   });
 }
 
