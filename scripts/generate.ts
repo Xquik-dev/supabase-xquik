@@ -139,7 +139,10 @@ set method = excluded.method,
 if (import.meta.main) {
   const rows = operationRows(JSON.parse(await Deno.readTextFile(SPEC_PATH)));
   const sql = renderMigration(rows);
-  const latest = await latestRegistryMigration().catch(() => "");
+  const latest = await latestRegistryMigration().catch((error: unknown) => {
+    if (error instanceof Deno.errors.NotFound) return "";
+    throw error;
+  });
   const current = latest === "" ? "" : await Deno.readTextFile(latest);
   const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
   const file = current === sql ? latest : `${MIGRATIONS}/${stamp}${REGISTRY_SUFFIX}`;
