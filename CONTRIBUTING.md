@@ -19,12 +19,12 @@ bin/check-local
 9. `scripts/type_coverage.ts` fails when the type of any value contains `any`, or when a statement leaves a promise, a voided promise or an array of promises that no code awaits.
 10. squawk assumes a transaction, except in a file with `create index concurrently`. `supabase migration up` runs that statement alone.
 11. `deno audit` and `bun audit` check `deno.lock` and `bun.lock` for known vulnerabilities.
-12. Every test must run and pass, with no ignored test or step. The tests must run every line, branch and function of every tracked TypeScript source file, and the coverage report must measure no other file. The SQL tests apply the migrations with `supabase migration up`. They fail on any Supabase advisor finding at any level, and when `supabase gen types` would change `supabase/functions/_shared/database.types.ts`.
+12. Every test must run and pass, with no ignored test or step. The tests must run every line, branch and function of every tracked TypeScript source file, and the coverage report must measure no other file. The SQL tests apply the migrations with `supabase migration up`. They fail on any Supabase advisor finding at any level, and when `supabase gen types` would change `supabase/functions/_shared/database.types.ts`. They also run every pgTAP test in `supabase/tests` with pgTAP 1.3.4 from PGXN, and fail on a failed test or a test count that differs from the file's plan. `lint/banned-patterns.txt` bans `skip`, `todo` and `no_plan` in those tests.
 13. CodeQL runs its security-extended queries over the tracked files.
 
 Fix what a check finds. Never suppress a finding or narrow a check.
 
-The checks need shellcheck, uv, jq and CodeQL on your PATH. The SQL tests start a throwaway cluster, so they also need the Postgres 18 `initdb` and `pg_ctl`.
+The checks need shellcheck, uv, jq and CodeQL on your PATH. The SQL tests start a throwaway cluster, so they also need the Postgres 18 `initdb`, `pg_ctl` and `psql`, Perl's `prove` and `unzip`.
 
 `deno task check` and `deno task test` give faster feedback while you work.
 

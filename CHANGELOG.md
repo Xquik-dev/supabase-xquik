@@ -16,3 +16,6 @@
 - Fail the checks on any Supabase advisor finding.
 - Add foreign tables in the `xquik` schema for public reads, through the
   Supabase Wrappers OpenAPI FDW.
+- Add pgTAP tests in `supabase/tests/database` for the tables, row level
+  security, policies, functions, grants and indexes. The checks run them on
+  every round, and `supabase test db` runs them on a local stack.
