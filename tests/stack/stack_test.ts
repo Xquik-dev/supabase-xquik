@@ -159,6 +159,34 @@ Deno.test("the Supabase stack", async (t) => {
       });
     });
 
+    await t.step(
+      "xquik.search_tweets sends q and the Vault key through the wrapper and returns each tweet",
+      async () => {
+        const [vaultKey] = await sql`select decrypted_secret from vault.decrypted_secrets where name = 'xquik_api_key'`;
+        await fakeXquik(sql, async (seen) => {
+          const [fake] =
+            await sql`select decrypted_secret as url from vault.decrypted_secrets where name = 'xquik_base_url'`;
+          await sql`begin`;
+          try {
+            await client.query<Record<string, unknown>, unknown[]>(
+              `alter server xquik_server options (set base_url ${client.escapeLiteral(String(fake?.["url"]))})`,
+            );
+            const tweets = await sql`select attrs ->> 'id' as id from xquik.search_tweets where q = 'NASA'`;
+            assertEquals(tweets.map((row) => row["id"]), ["1", "2"]);
+          } finally {
+            await sql`rollback`;
+          }
+          assertEquals(
+            seen.map(({ apiKey, ...request }) => ({
+              ...request,
+              sentVaultKey: apiKey === vaultKey?.["decrypted_secret"],
+            })),
+            [{ method: "GET", path: "/api/v1/x/tweets/search", query: { q: "NASA" }, body: null, sentVaultKey: true }],
+          );
+        });
+      },
+    );
+
     await t.step("xquik.enqueue sends an action with pg_net and xquik.collect finishes it", async () => {
       await fakeXquik(sql, async (seen) => {
         const finish = async (handle: string) => {
