@@ -87,9 +87,9 @@ function literalEdits(node: ts.Node, source: ts.SourceFile, start: number): Edit
 function nodeEdits(node: ts.Node, source: ts.SourceFile): Edit[] {
   const start = node.getStart(source);
   if (ts.isBinaryExpression(node)) {
-    const replacement = OPERATORS.get(node.operatorToken.kind);
     const operator = node.operatorToken;
-    return replacement === undefined ? [] : [[operator.getStart(source), operator.end, replacement]];
+    return [OPERATORS.get(operator.kind)].filter((replacement) => replacement !== undefined)
+      .map((replacement): Edit => [operator.getStart(source), operator.end, replacement]);
   }
   if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.ExclamationToken) {
     return [[start, node.operand.getStart(source), ""]];
