@@ -90,15 +90,15 @@ export function memoryStore(): MemoryStore {
   const nonces = new Set<string>();
   const events = new Map<string, MonitorEvent>();
   const store: DeliveryStore = {
-    claimNonce(nonce): Promise<"new" | "replay"> {
-      if (nonces.has(nonce)) return Promise.resolve("replay");
+    async claimNonce(nonce): Promise<"new" | "replay"> {
+      if (nonces.has(nonce)) return await Promise.resolve("replay");
       nonces.add(nonce);
-      return Promise.resolve("new");
+      return await Promise.resolve("new");
     },
-    saveEvent(event): Promise<"new" | "duplicate"> {
-      if (events.has(event.streamEventId)) return Promise.resolve("duplicate");
+    async saveEvent(event): Promise<"new" | "duplicate"> {
+      if (events.has(event.streamEventId)) return await Promise.resolve("duplicate");
       events.set(event.streamEventId, event);
-      return Promise.resolve("new");
+      return await Promise.resolve("new");
     },
   };
   return { nonces, events, store };
@@ -108,6 +108,13 @@ export type Receiver = { readonly deps: DeliveryDeps; readonly scheduled: Monito
 
 export function receiver(store: DeliveryStore, secrets: readonly string[] = [SECRET]): Receiver {
   const scheduled: MonitorEvent[] = [];
-  const deps: DeliveryDeps = { secrets, now: () => NOW, store, after: (event) => scheduled.push(event) };
+  const deps: DeliveryDeps = {
+    secrets,
+    now: () => NOW,
+    store,
+    after: (event) => {
+      scheduled.push(event);
+    },
+  };
   return { deps, scheduled };
 }

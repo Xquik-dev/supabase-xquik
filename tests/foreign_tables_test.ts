@@ -9,6 +9,12 @@ const page = {
   properties: { items: { type: "array" }, next_cursor: { type: "string" } },
 };
 
+const format = (values: string[]) => ({ name: "format", in: "query", schema: { type: "string", enum: values } });
+
+const read = (operationId: string, parameters: unknown[], schema: unknown) => ({
+  get: { operationId, parameters, responses: jsonAnswer(schema) },
+});
+
 Deno.test("columns follow the path item's parameters, resolve references & take the first non-null type", () => {
   const tables = foreignTables(publicOperations({
     security: [{ apiKey: [] }],
@@ -54,7 +60,6 @@ Deno.test("columns follow the path item's parameters, resolve references & take 
 });
 
 Deno.test("a read gets a table only when it is public & answers with JSON or a json format", () => {
-  const format = (values: string[]) => ({ name: "format", in: "query", schema: { type: "string", enum: values } });
   const file = { "200": { content: { "application/octet-stream": { schema: { type: "string" } } } } };
   const tables = foreignTables(publicOperations({
     security: [{ oauthBearer: [] }],
@@ -85,22 +90,19 @@ Deno.test("a read gets a table only when it is public & answers with JSON or a j
 });
 
 Deno.test("a list read pages only when it takes a cursor & any answer shape carries the next one", () => {
-  const cursor = { name: "cursor", in: "query", schema: { type: "string" } };
+  const cursorParameter = { name: "cursor", in: "query", schema: { type: "string" } };
   const afterCursor = { name: "afterCursor", in: "query", schema: { type: "string" } };
   const camelPage = { ...page, properties: { items: { type: "array" }, nextCursor: { type: "string" } } };
-  const read = (operationId: string, parameters: unknown[], schema: unknown) => ({
-    get: { operationId, parameters, responses: jsonAnswer(schema) },
-  });
   const tables = foreignTables(publicOperations({
     security: [{}],
     components: { schemas: { Page: page } },
     paths: {
-      "/b": read("pagedThroughOneOf", [cursor], {
+      "/b": read("pagedThroughOneOf", [cursorParameter], {
         oneOf: [{ $ref: "#/components/schemas/Page" }, { allOf: [{ $ref: "#/components/schemas/Page" }] }],
       }),
-      "/a": read("pagedThroughAnyOf", [cursor], { anyOf: [{ type: "object" }, page] }),
+      "/a": read("pagedThroughAnyOf", [cursorParameter], { anyOf: [{ type: "object" }, page] }),
       "/c": read("noCursorParameter", [], page),
-      "/d": read("noCursorInAnswer", [cursor], { ...page, properties: { items: { type: "array" } } }),
+      "/d": read("noCursorInAnswer", [cursorParameter], { ...page, properties: { items: { type: "array" } } }),
       "/e": read("pagedAfterCamelCursor", [afterCursor], camelPage),
     },
   }));

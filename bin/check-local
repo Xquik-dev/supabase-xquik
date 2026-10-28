@@ -85,7 +85,7 @@ run_check() {
   [[ -z "${label}" ]] || passed+=("${label}")
 }
 
-run_check "" "Install the locked Deno and squawk versions" \
+run_check "" "Install the packages that bun.lock pins" \
   "Install Bun and check network access, or update bun.lock, then rerun." \
   bun install --frozen-lockfile
 deno=node_modules/.bin/deno
@@ -223,25 +223,141 @@ lint_sql() {
     { ((${#concurrent[@]} == 0)) || node_modules/.bin/squawk "${concurrent[@]}"; }
 }
 
+tools="${XDG_CACHE_HOME:-${HOME}/.cache}/supabase-xquik-tools"
+
+fetch_tools() {
+  local platform name url sha256 member archive
+  platform="$(uname -sm)" || return
+  [[ "${platform}" == "Linux x86_64" ]] || {
+    echo "The pinned gitleaks, lychee and vale releases are Linux x86_64 builds, so the checks run only on Linux x86_64." >&2
+    return 1
+  }
+  mkdir -p "${tools}" "${workspace}/bin" || return
+  while read -r name url sha256 member; do
+    archive="${tools}/${sha256}.tar.gz"
+    [[ -f "${archive}" ]] || {
+      curl -fsSL --retry 3 -o "${archive}.$$" "${url}" && mv -f "${archive}.$$" "${archive}"
+    } || return
+    sha256sum --check --quiet <<<"${sha256}  ${archive}" || {
+      echo "The cached ${name} release does not match its pinned sha256. Delete ${archive} and rerun." >&2
+      return 1
+    }
+    mkdir "${workspace}/tools-${name}" &&
+      tar -xzf "${archive}" -C "${workspace}/tools-${name}" "${member}" &&
+      ln -s "${workspace}/tools-${name}/${member}" "${workspace}/bin/${name}" || return
+  done <<'TOOLS'
+gitleaks https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb gitleaks
+lychee https://github.com/lycheeverse/lychee/releases/download/lychee-v0.24.2/lychee-x86_64-unknown-linux-musl.tar.gz 73657a111819a30c47c08352896796f23d64e4eb2b3ed39b6d32149241566fc5 lychee-x86_64-unknown-linux-musl/lychee
+vale https://github.com/vale-cli/vale/releases/download/v3.24.0/vale_3.24.0_Linux_64-bit.tar.gz 867534ddb678abca7f214bc4706ead0922bd5252ffe8035fc227013f66c8b214 vale
+TOOLS
+}
+
+scan_secrets() {
+  [[ ! -e .gitleaksignore ]] || {
+    echo "gitleaks reads .gitleaksignore whatever its flags say. Remove the file and fix each finding it hid." >&2
+    return 1
+  }
+  printf '[extend]\nuseDefault = true\n' >"${workspace}/gitleaks.toml" && mkdir "${workspace}/gitleaks-ignore" &&
+    "${workspace}/bin/gitleaks" git --config="${workspace}/gitleaks.toml" \
+      --gitleaks-ignore-path="${workspace}/gitleaks-ignore" --ignore-gitleaks-allow --max-archive-depth=8 \
+      --log-opts="--full-history --all --diff-merges=remerge" --no-banner --no-color --redact --verbose .
+}
+
+check_links() {
+  [[ ! -e .lycheeignore ]] || {
+    echo "lychee reads .lycheeignore whatever its flags say. Remove the file and fix each link it hid." >&2
+    return 1
+  }
+  : >"${workspace}/lychee.toml" &&
+    git ls-files --cached --others --exclude-standard -- '*.md' |
+    "${workspace}/bin/lychee" --config="${workspace}/lychee.toml" --offline --no-progress --include-fragments=full \
+      --include-verbatim --include-mail --files-from -
+}
+
+lint_prose() {
+  local listing files=() status=0
+  listing="$(git ls-files --cached --others --exclude-standard -- '*.md')" || return
+  mapfile -t files <<<"${listing}"
+  "${workspace}/bin/vale" --output=line "${files[@]}" >"${workspace}/vale.log" || status=$?
+  [[ ! -s "${workspace}/vale.log" ]] || {
+    cat "${workspace}/vale.log" >&2
+    return 1
+  }
+  return "${status}"
+}
+
+lint_code_health() {
+  local fallow=node_modules/.bin/fallow
+  "${fallow}" health --no-cache --complexity --fail-on-issues --quiet &&
+    "${fallow}" dupes --no-cache --quiet &&
+    "${fallow}" dupes --no-cache --cross-language --quiet
+}
+
+
+lint_type_aware() {
+  local source="${workspace}/oxlint-source" listing files=() files_json
+  listing="$(git ls-files --cached --others --exclude-standard -- '*.ts')" || return
+  mapfile -t files <<<"${listing}"
+  files_json="$(jq -nR '[inputs]' <<<"${listing}")" || return
+  mkdir "${source}" &&
+    git ls-files -z --cached --others --exclude-standard | tar --null -T - -cf - | tar -xf - -C "${source}" || return
+  (
+    cd "${source}" || exit
+    "${root}/${deno}" install --vendor --frozen --quiet || exit
+    "${root}/${deno}" types >deno.d.ts || exit
+    local found meta metas=()
+    found="$(find vendor/jsr.io -name '*_meta.json')" || exit
+    while IFS= read -r meta; do metas+=(--slurpfile "${meta}" "${meta}"); done <<<"${found}"
+    jq -n --slurpfile config deno.json --slurpfile lock deno.lock --argjson files "${files_json}" "${metas[@]}" '
+      $ARGS.named as $metas
+      | [ $lock[0].specifiers | to_entries[] | select(.key | startswith("jsr:"))
+          | (.key | capture("^jsr:(?<name>@[^/@]+/[^/@]+)@").name) as $name
+          | { specifier: .key, root: "./vendor/jsr.io/\($name)/\(.value)/",
+              exports: $metas["vendor/jsr.io/\($name)/\(.value)_meta.json"][0].exports } ] as $packages
+      | [ $config[0].imports | to_entries[] | select(.value | startswith("jsr:")) ] as $aliases
+      | [ $packages[] as $package
+          | ([$package.specifier] + [$aliases[] | select(.value == $package.specifier) | .key])[] as $prefix
+          | $package.exports | to_entries[]
+          | { key: ($prefix + (.key | ltrimstr("."))), value: [$package.root + (.value | ltrimstr("./"))] } ] as $paths
+      | { compilerOptions: ($config[0].compilerOptions + { target: "esnext", module: "preserve",
+            moduleResolution: "bundler", lib: ["esnext"], noEmit: true, allowImportingTsExtensions: true,
+            paths: ($paths | from_entries) }),
+          files: (["deno.d.ts"] + $files) }' >tsconfig.json || exit
+    OXLINT_TSGOLINT_PATH="${root}/node_modules/.bin/tsgolint" "${root}/node_modules/.bin/oxlint" \
+      --type-aware --type-check --format=unix "${files[@]}"
+  )
+}
+
 run_check "bans" "Suppression and exclusion ban" \
   "Remove each suppression or exclusion listed above and fix what it hid." no_banned_patterns
-run_check "" "Exclusion keys in deno.json" "Remove the keys listed above." no_config_exclusions
+run_check "deno.json keys" "Exclusion keys in deno.json" "Remove the keys listed above." no_config_exclusions
+run_check "" "Fetch the pinned gitleaks, lychee and vale releases" \
+  "Check network access to github.com, then rerun." fetch_tools
+run_check "gitleaks" "Secret scan of the full git history with gitleaks" \
+  "Remove each secret listed above from history, rotate it, then rerun." scan_secrets
+run_check "lychee" "Link check of every tracked Markdown file with lychee" \
+  "Fix each broken link or fragment listed above." check_links
+run_check "vale" "Prose lint of every tracked Markdown file with vale" \
+  "Rewrite each sentence listed above." lint_prose
 run_check "shellcheck" "Shell lint with every optional shellcheck check" "Fix the shellcheck findings above." lint_shell
 run_check "REUSE" "Licensing with REUSE lint" \
   "Give each file listed above a license and copyright in REUSE.toml or an SPDX header." \
   uv tool run --from "reuse==${reuse_version}" reuse lint
 run_check "format" "Format check" "Run ${deno} fmt, then rerun." "${deno}" fmt --check
 run_check "lint" "Lint" "Fix the lint findings above." "${deno}" lint
+run_check "oxlint" "Type-aware lint with oxlint and tsgolint" \
+  "Fix the oxlint findings and type errors above." lint_type_aware
+run_check "fallow" "Complexity and duplication with fallow" \
+  "Split each function or merge each clone listed above." lint_code_health
 run_check "types" "Type check" "Fix the type errors above." "${deno}" check
 run_check "100% typed, awaited promises" "Type coverage and floating promises" \
   "Give each value listed above a type without any, and await each promise listed above." type_coverage
 run_check "squawk" "SQL lint" "Fix the squawk findings above." lint_sql
 run_check "audit" "Dependency audit of deno.lock and bun.lock" \
   "Upgrade each package named above, then rerun." audit_dependencies
-run_check "" "Tests with 100% line, branch and function coverage" \
+run_check "tests" "Tests with 100% line, branch and function coverage" \
   "Fix the failing tests, run the ignored ones, or test the lines, branches and functions listed above." run_tests
 tests_passed="$(sed -nE 's/^ok \| ([0-9]+) passed.*/\1/p' "${workspace}/tests.log" | tail -n 1)"
-passed+=("${tests_passed:+${tests_passed} }tests at 100% coverage")
 run_check "CodeQL" "Static analysis with the CodeQL security-extended queries" \
   "Fix the CodeQL findings above, then rerun." run_codeql
 
@@ -268,5 +384,6 @@ if [[ -n "${status_commit}" ]]; then
   }
 fi
 printf -v joined '%s, ' "${passed[@]}"
-summary="${joined%, }."
+echo "The checks were ${joined%, }."
+summary="${#passed[@]} checks with ${tests_passed:+${tests_passed} }tests at 100% coverage."
 echo "All local checks passed. They were ${summary}"

@@ -40,14 +40,17 @@ async function project(
 Deno.test("reports each value whose type holds any, in a union member or a type argument", async () => {
   const root = await project({ "first.ts": ANY_FROM_LIBRARIES });
   const report = await typeCoverage(root, ["first.ts"]);
-  assertEquals(report.uncovered.map(({ file, line, column, text }) => `${file}:${line}:${column} ${text}`), [
-    "first.ts:2:36 value[0]",
-    "first.ts:2:36 value",
-    "first.ts:5:14 parsed",
-    `first.ts:5:23 Promise.resolve(JSON.parse("1"))`,
-    `first.ts:5:39 JSON.parse("1")`,
-    "first.ts:6:49 parsed",
-  ]);
+  assertEquals(
+    report.uncovered.map(({ file, line, column, text }) => `${file}:${String(line)}:${String(column)} ${text}`),
+    [
+      "first.ts:2:36 value[0]",
+      "first.ts:2:36 value",
+      "first.ts:5:14 parsed",
+      `first.ts:5:23 Promise.resolve(JSON.parse("1"))`,
+      `first.ts:5:39 JSON.parse("1")`,
+      "first.ts:6:49 parsed",
+    ],
+  );
   assertEquals(summary(report).split("\n").slice(-2), [
     "Type coverage is 71.43%. 6 of 21 values have a type that contains any.",
     "0 of 0 expression statements leave a promise that no code awaits.",
@@ -57,15 +60,18 @@ Deno.test("reports each value whose type holds any, in a union member or a type 
 Deno.test("reports each statement that leaves a thenable, a voided thenable or an array of them unawaited", async () => {
   const root = await project({ "promises.ts": PROMISES });
   const report = await typeCoverage(root, ["promises.ts"]);
-  assertEquals(report.floating.map(({ file, line, column, text }) => `${file}:${line}:${column} ${text}`), [
-    "promises.ts:2:3 Promise.resolve(1)",
-    "promises.ts:4:3 void Promise.resolve(3)",
-    "promises.ts:5:3 maybe",
-    "promises.ts:6:3 Promise.resolve(4).then(() => 5)",
-    "promises.ts:8:3 ({ then: (): number => 8 })",
-    "promises.ts:9:3 [1, 2].map(async (n) => n)",
-    "promises.ts:11:3 pair",
-  ]);
+  assertEquals(
+    report.floating.map(({ file, line, column, text }) => `${file}:${String(line)}:${String(column)} ${text}`),
+    [
+      "promises.ts:2:3 Promise.resolve(1)",
+      "promises.ts:4:3 void Promise.resolve(3)",
+      "promises.ts:5:3 maybe",
+      "promises.ts:6:3 Promise.resolve(4).then(() => 5)",
+      "promises.ts:8:3 ({ then: (): number => 8 })",
+      "promises.ts:9:3 [1, 2].map(async (n) => n)",
+      "promises.ts:11:3 pair",
+    ],
+  );
   assertEquals(
     summary(report).split("\n").at(-1),
     "7 of 10 expression statements leave a promise that no code awaits.",
@@ -84,15 +90,23 @@ Deno.test("resolves local, jsr and npm imports the way deno check does", async (
 Deno.test("fails when the program has a type error, a bad compiler option or a config deno rejects", async () => {
   const typeError = await project({ "wrong.ts": `export const count: number = "one";\n` });
   await assertRejects(
-    () => typeCoverage(typeError, ["wrong.ts"]),
+    async () => await typeCoverage(typeError, ["wrong.ts"]),
     Error,
     `wrong.ts:1:14 Type 'string' is not assignable to type 'number'.`,
   );
   const fine = { "fine.ts": "export const count = 1;\n" };
   const badOption = await project(fine, { compilerOptions: { strict: "yes" } });
-  await assertRejects(() => typeCoverage(badOption, ["fine.ts"]), Error, "Compiler option 'strict' requires");
+  await assertRejects(
+    async () => await typeCoverage(badOption, ["fine.ts"]),
+    Error,
+    "Compiler option 'strict' requires",
+  );
   const badLock = await project(fine, { compilerOptions: {}, lock: 5 });
-  await assertRejects(() => typeCoverage(badLock, ["fine.ts"]), Error, "deno info failed with exit code 1.");
+  await assertRejects(
+    async () => await typeCoverage(badLock, ["fine.ts"]),
+    Error,
+    "deno info failed with exit code 1.",
+  );
 });
 
 Deno.test("the command exits 1 and lists the sites only when a value has any or a promise floats", async () => {
