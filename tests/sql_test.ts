@@ -1,4 +1,4 @@
-import { assert, assertArrayIncludes, assertEquals, assertExists, assertMatch } from "@std/assert";
+import { assert, assertArrayIncludes, assertEquals, assertExists, assertMatch, assertNotMatch } from "@std/assert";
 import pg, { DatabaseError } from "pg";
 import { z } from "zod";
 import { FOREIGN_TABLES_SUFFIX } from "../scripts/foreign_tables.ts";
@@ -36,6 +36,7 @@ const NO_JSON_ANSWER = ["downloadSupportAttachment", "streamEvents"];
 const PGTAP_VERSION = "1.3.4";
 const PGTAP_ARCHIVE = `https://api.pgxn.org/dist/pgtap/${PGTAP_VERSION}/pgtap-${PGTAP_VERSION}.zip`;
 const PGTAP_SHA256 = "2570574a9321082e82433768feb5bffe472ef2ced6b22608a86bfd25f2b88e40";
+const PROVE = ["--norc", "--failures", "--comments", "--directives", "--recurse", "--ext=.sql", "--ext=.pg"];
 const PSQL = "psql --no-psqlrc --no-align --quiet --tuples-only --pset=pager=off --set=ON_ERROR_STOP=1 --file";
 
 const security = z.array(z.record(z.string(), z.unknown()));
@@ -81,8 +82,8 @@ async function buildPgtap(dir: string): Promise<string> {
   const extension = `${dir}/pgtap/extension`;
   await Deno.mkdir(extension, { recursive: true });
   await Deno.copyFile(`${dir}/${source}/pgtap.control`, `${extension}/pgtap.control`);
-  const script = (await Deno.readTextFile(`${dir}/${source}/sql/pgtap.sql.in`)).replaceAll("MODULE_PATHNAME", "pgtap")
-    .replaceAll("__OS__", Deno.build.os).replaceAll("__VERSION__", PGTAP_VERSION.split(".").slice(0, 2).join("."));
+  const script = (await Deno.readTextFile(`${dir}/${source}/sql/pgtap.sql.in`)).replaceAll("__OS__", Deno.build.os)
+    .replaceAll("__VERSION__", PGTAP_VERSION.split(".").slice(0, 2).join("."));
   await Deno.writeTextFile(`${extension}/pgtap--${PGTAP_VERSION}.sql`, script);
   return `${dir}/pgtap`;
 }
@@ -620,15 +621,16 @@ async function formatted(source: string): Promise<string> {
 }
 
 async function testPgtap(t: Deno.TestContext, client: pg.Client, dir: string): Promise<void> {
-  await t.step("every pgTAP test in supabase/tests passes and each file runs exactly its planned count", async () => {
+  await t.step("every pgTAP test passes with no skip or todo, and each file runs exactly its plan", async () => {
     await query(client, "create extension pgtap with schema extensions");
     try {
       const report = await run(
         "prove",
-        ["--norc", "--failures", "--comments", "-r", "--ext", ".sql", "--ext", ".pg", "--exec", PSQL, "supabase/tests"],
+        [...PROVE, "--exec", PSQL, "supabase/tests"],
         { PGHOST: dir, PGUSER: "postgres", PGDATABASE: "postgres", PGOPTIONS: "-c search_path=public,extensions" },
       );
       assertMatch(report, /^Result: PASS$/m);
+      assertNotMatch(report, /# (?:skip|todo)\b|skipped:/i);
     } finally {
       await query(client, "drop extension pgtap");
     }

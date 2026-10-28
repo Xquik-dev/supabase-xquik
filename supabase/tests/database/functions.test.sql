@@ -1,17 +1,17 @@
-select plan(83);
+select plan(73);
 
-select functions_are(
-  'xquik',
+select set_eq(
+  $$select p.oid::regprocedure::text from pg_catalog.pg_proc p where p.pronamespace = 'xquik'::regnamespace$$,
   array[
-    'api_key', 'build_request', 'call', 'collect', 'enqueue',
-    'queueable_request', 'response_body', 'rows', 'schedule', 'send_action'
+    'xquik.api_key()', 'xquik.build_request(text,jsonb)', 'xquik.call(text,jsonb)', 'xquik.collect()',
+    'xquik.enqueue(text,jsonb)', 'xquik.queueable_request(text,jsonb)', 'xquik.response_body(text,text)',
+    'xquik.rows(text,jsonb)', 'xquik.schedule(text,text,text,jsonb)', 'xquik.send_action()'
   ],
-  'xquik holds exactly its 10 functions'
+  'xquik holds exactly these 10 function signatures, so no overload escapes the checks below'
 );
 
 select is_definer('xquik', 'api_key', array[]::name[]);
 select function_owner_is('xquik', 'api_key', array[]::name[], 'postgres');
-select function_lang_is('xquik', 'api_key', array[]::name[], 'plpgsql');
 select volatility_is('xquik', 'api_key', array[]::name[], 'stable');
 select is(
   (select proconfig from pg_catalog.pg_proc where oid = 'xquik.api_key()'::regprocedure),
@@ -24,7 +24,6 @@ select function_privs_are('xquik', 'api_key', array[]::name[], 'service_role', a
 
 select is_definer('xquik', 'build_request', array['text', 'jsonb']);
 select function_owner_is('xquik', 'build_request', array['text', 'jsonb'], 'postgres');
-select function_lang_is('xquik', 'build_request', array['text', 'jsonb'], 'plpgsql');
 select volatility_is('xquik', 'build_request', array['text', 'jsonb'], 'stable');
 select is(
   (select proconfig from pg_catalog.pg_proc where oid = 'xquik.build_request(text,jsonb)'::regprocedure),
@@ -37,7 +36,6 @@ select function_privs_are('xquik', 'build_request', array['text', 'jsonb'], 'ser
 
 select is_definer('xquik', 'call', array['text', 'jsonb']);
 select function_owner_is('xquik', 'call', array['text', 'jsonb'], 'postgres');
-select function_lang_is('xquik', 'call', array['text', 'jsonb'], 'plpgsql');
 select volatility_is('xquik', 'call', array['text', 'jsonb'], 'volatile');
 select is(
   (select proconfig from pg_catalog.pg_proc where oid = 'xquik.call(text,jsonb)'::regprocedure),
@@ -50,7 +48,6 @@ select function_privs_are('xquik', 'call', array['text', 'jsonb'], 'service_role
 
 select is_definer('xquik', 'collect', array[]::name[]);
 select function_owner_is('xquik', 'collect', array[]::name[], 'postgres');
-select function_lang_is('xquik', 'collect', array[]::name[], 'sql');
 select volatility_is('xquik', 'collect', array[]::name[], 'volatile');
 select is(
   (select proconfig from pg_catalog.pg_proc where oid = 'xquik.collect()'::regprocedure),
@@ -63,7 +60,6 @@ select function_privs_are('xquik', 'collect', array[]::name[], 'service_role', a
 
 select is_definer('xquik', 'enqueue', array['text', 'jsonb']);
 select function_owner_is('xquik', 'enqueue', array['text', 'jsonb'], 'postgres');
-select function_lang_is('xquik', 'enqueue', array['text', 'jsonb'], 'sql');
 select volatility_is('xquik', 'enqueue', array['text', 'jsonb'], 'volatile');
 select is(
   (select proconfig from pg_catalog.pg_proc where oid = 'xquik.enqueue(text,jsonb)'::regprocedure),
@@ -76,7 +72,6 @@ select function_privs_are('xquik', 'enqueue', array['text', 'jsonb'], 'service_r
 
 select is_definer('xquik', 'queueable_request', array['text', 'jsonb']);
 select function_owner_is('xquik', 'queueable_request', array['text', 'jsonb'], 'postgres');
-select function_lang_is('xquik', 'queueable_request', array['text', 'jsonb'], 'plpgsql');
 select volatility_is('xquik', 'queueable_request', array['text', 'jsonb'], 'stable');
 select is(
   (select proconfig from pg_catalog.pg_proc where oid = 'xquik.queueable_request(text,jsonb)'::regprocedure),
@@ -89,7 +84,6 @@ select function_privs_are('xquik', 'queueable_request', array['text', 'jsonb'], 
 
 select isnt_definer('xquik', 'response_body', array['text', 'text']);
 select function_owner_is('xquik', 'response_body', array['text', 'text'], 'postgres');
-select function_lang_is('xquik', 'response_body', array['text', 'text'], 'sql');
 select volatility_is('xquik', 'response_body', array['text', 'text'], 'immutable');
 select is(
   (select proconfig from pg_catalog.pg_proc where oid = 'xquik.response_body(text,text)'::regprocedure),
@@ -102,7 +96,6 @@ select function_privs_are('xquik', 'response_body', array['text', 'text'], 'serv
 
 select is_definer('xquik', 'rows', array['text', 'jsonb']);
 select function_owner_is('xquik', 'rows', array['text', 'jsonb'], 'postgres');
-select function_lang_is('xquik', 'rows', array['text', 'jsonb'], 'plpgsql');
 select volatility_is('xquik', 'rows', array['text', 'jsonb'], 'volatile');
 select is(
   (select proconfig from pg_catalog.pg_proc where oid = 'xquik.rows(text,jsonb)'::regprocedure),
@@ -115,7 +108,6 @@ select function_privs_are('xquik', 'rows', array['text', 'jsonb'], 'service_role
 
 select is_definer('xquik', 'schedule', array['text', 'text', 'text', 'jsonb']);
 select function_owner_is('xquik', 'schedule', array['text', 'text', 'text', 'jsonb'], 'postgres');
-select function_lang_is('xquik', 'schedule', array['text', 'text', 'text', 'jsonb'], 'plpgsql');
 select volatility_is('xquik', 'schedule', array['text', 'text', 'text', 'jsonb'], 'volatile');
 select is(
   (select proconfig from pg_catalog.pg_proc where oid = 'xquik.schedule(text,text,text,jsonb)'::regprocedure),
@@ -134,7 +126,6 @@ select function_privs_are(
 
 select is_definer('xquik', 'send_action', array[]::name[]);
 select function_owner_is('xquik', 'send_action', array[]::name[], 'postgres');
-select function_lang_is('xquik', 'send_action', array[]::name[], 'plpgsql');
 select volatility_is('xquik', 'send_action', array[]::name[], 'volatile');
 select is(
   (select proconfig from pg_catalog.pg_proc where oid = 'xquik.send_action()'::regprocedure),

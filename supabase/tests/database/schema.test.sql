@@ -1,4 +1,4 @@
-select plan(75);
+select plan(71);
 
 select has_schema('xquik', 'the xquik schema exists');
 select schema_owner_is('xquik', 'postgres', 'postgres owns the xquik schema');
@@ -24,8 +24,6 @@ select col_not_null('xquik', 'operations', 'path', 'xquik.operations.path is req
 select col_not_null('xquik', 'operations', 'kind', 'xquik.operations.kind is required');
 select col_is_null('xquik', 'operations', 'list_field', 'xquik.operations.list_field is optional');
 select col_is_pk('xquik', 'operations', 'operation_id', 'xquik.operations is keyed by operation_id');
-select col_has_check('xquik', 'operations', 'method', 'xquik.operations.method accepts only HTTP methods');
-select col_has_check('xquik', 'operations', 'kind', 'xquik.operations.kind accepts only read or write');
 
 select columns_are(
   'public', 'xquik_actions',
@@ -75,13 +73,6 @@ select fk_ok(
   'public', 'xquik_actions', 'operation_id', 'xquik', 'operations', 'operation_id',
   'each action names an operation in xquik.operations'
 );
-select col_has_check('public', 'xquik_actions', 'status', 'public.xquik_actions.status accepts only its 4 states');
-select col_has_check(
-  'public', 'xquik_actions', array['status', 'request_id'], 'only a queued action lacks a pg_net request id'
-);
-select col_has_check(
-  'public', 'xquik_actions', array['status', 'finished_at'], 'only a succeeded or failed action has finished_at'
-);
 
 select columns_are(
   'public', 'xquik_events',
@@ -126,6 +117,24 @@ select col_default_is(
   'public', 'xquik_webhook_nonces', 'seen_at', 'now()', 'public.xquik_webhook_nonces.seen_at defaults to now()'
 );
 select col_is_pk('public', 'xquik_webhook_nonces', 'nonce', 'public.xquik_webhook_nonces is keyed by nonce');
+
+select set_eq(
+  $$select n.nspname || '.' || c.relname, pg_get_constraintdef(k.oid) from pg_catalog.pg_constraint k
+    join pg_catalog.pg_class c on c.oid = k.conrelid join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+    where k.contype = 'c' and n.nspname in ('public', 'xquik')$$,
+  $$values
+    ('xquik.operations',
+    'CHECK ((method = ANY (ARRAY[''GET''::text, ''POST''::text, ''PUT''::text, ''PATCH''::text, ''DELETE''::text])))'),
+    ('xquik.operations',
+    'CHECK ((kind = ANY (ARRAY[''read''::text, ''write''::text])))'),
+    ('public.xquik_actions',
+    'CHECK ((status = ANY (ARRAY[''queued''::text, ''sent''::text, ''succeeded''::text, ''failed''::text])))'),
+    ('public.xquik_actions',
+    'CHECK (((status = ''queued''::text) = (request_id IS NULL)))'),
+    ('public.xquik_actions',
+    'CHECK (((status = ANY (ARRAY[''succeeded''::text, ''failed''::text])) = (finished_at IS NOT NULL)))')$$,
+  'the tables hold exactly these 5 checks on method, kind, status, request_id and finished_at'
+);
 
 select table_owner_is('xquik', 'operations', 'postgres', 'postgres owns xquik.operations');
 select table_owner_is('public', 'xquik_actions', 'postgres', 'postgres owns public.xquik_actions');
