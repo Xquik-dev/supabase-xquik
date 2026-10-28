@@ -24,7 +24,7 @@ bin/check-local
 14. `deno check` checks the types with the strict compiler options in `deno.json`.
 15. `scripts/type_coverage.ts` fails when the type of any value contains `any`. It also fails when a statement leaves a promise, a voided promise or an array of promises that no code awaits.
 16. squawk assumes a transaction, except in a file with `create index concurrently`. `supabase migration up` runs that statement alone.
-17. `git diff` fails when a branch edits, renames or deletes a migration on `origin/main`, or replaces it with a symbolic link, since a database may have applied it. Put each schema change in a new migration.
+17. `git diff` fails when a branch edits, renames or deletes a migration on `origin/main`, or replaces it with a symbolic link. A database may have applied that migration. Put each schema change in a new migration.
 18. `deno audit` and `bun audit` check `deno.lock` and `bun.lock` for known vulnerabilities.
 19. Every test must run and pass, with no ignored test or step. The tests must run every line, branch and function of every tracked TypeScript source file, and the coverage report must measure no other file. The SQL tests apply the migrations with `supabase migration up`. They fail on any Supabase advisor finding at any level, and when `deno task types` would change `supabase/functions/_shared/database.types.ts`. They also run every pgTAP test in `supabase/tests` with pgTAP 1.3.4 from PGXN. They fail on a failed, skipped or `todo` test. They also fail when a file runs more or fewer tests than its plan. `lint/banned-patterns.txt` bans `skip`, `todo`, `todo_start` and `no_plan` calls.
 20. CodeQL runs its security-extended queries over the tracked files.
