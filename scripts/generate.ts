@@ -4,13 +4,16 @@ export const SPEC_PATH = "openapi.json";
 const MIGRATIONS = "supabase/migrations";
 const REGISTRY_SUFFIX = "_xquik_operations.sql";
 
+export function migrationFiles(): string[] {
+  return Deno.readDirSync(MIGRATIONS).map((entry) => `${MIGRATIONS}/${entry.name}`).filter((path) =>
+    path.endsWith(".sql")
+  ).toArray().sort();
+}
+
 export function latestRegistryMigration(): string {
-  const names = Deno.readDirSync(MIGRATIONS).map((entry) => entry.name).filter((name) =>
-    name.endsWith(REGISTRY_SUFFIX)
-  );
-  const latest = names.toArray().sort().at(-1);
+  const latest = migrationFiles().filter((path) => path.endsWith(REGISTRY_SUFFIX)).at(-1);
   if (latest === undefined) throw new Deno.errors.NotFound(`No *${REGISTRY_SUFFIX} migration in ${MIGRATIONS}`);
-  return `${MIGRATIONS}/${latest}`;
+  return latest;
 }
 
 const METHODS = { get: "GET", put: "PUT", post: "POST", patch: "PATCH", delete: "DELETE" } as const;

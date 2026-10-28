@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import pg, { DatabaseError } from "pg";
-import { latestRegistryMigration, operationRows, SPEC_PATH } from "../scripts/generate.ts";
+import { latestRegistryMigration, migrationFiles, operationRows, SPEC_PATH } from "../scripts/generate.ts";
 
 type Row = Record<string, unknown>;
 type Reply = readonly [status: number, type: string | null, content: string | null];
@@ -47,18 +47,19 @@ async function startCluster(dir: string): Promise<void> {
   });
 }
 
+async function query(client: pg.Client, text: string, values: unknown[] = []): Promise<Row[]> {
+  return (await client.query<Row, unknown[]>(text, values)).rows;
+}
+
 async function applyMigrations(client: pg.Client): Promise<void> {
-  await client.query(await Deno.readTextFile("tests/sql/supabase.sql"));
-  const names = await Array.fromAsync(Deno.readDir("supabase/migrations"), (entry) => entry.name);
-  for (const name of names.filter((name) => name.endsWith(".sql")).sort()) {
-    await client.query(await Deno.readTextFile(`supabase/migrations/${name}`));
-  }
-  await client.query("select vault.create_secret('xq_test_key', 'xquik_api_key')");
+  await query(client, await Deno.readTextFile("tests/sql/supabase.sql"));
+  for (const file of migrationFiles()) await query(client, await Deno.readTextFile(file));
+  await query(client, "select vault.create_secret('xq_test_key', 'xquik_api_key')");
 }
 
 async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<void> {
-  const sql = async (strings: TemplateStringsArray, ...values: unknown[]): Promise<Row[]> =>
-    (await client.query(strings.reduce((text, part, index) => `${text}$${index}${part}`), values)).rows;
+  const sql = (strings: TemplateStringsArray, ...values: unknown[]): Promise<Row[]> =>
+    query(client, strings.reduce((text, part, index) => `${text}$${index}${part}`), values);
 
   const step = (name: string, body: () => Promise<void>): Promise<boolean> =>
     t.step(name, async (): Promise<void> => {
@@ -339,7 +340,7 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
       { id: nasa?.["id"], name: "nasa", schedule: "*/15 * * * *" },
       { id: account?.["id"], name: "account", schedule: "0 * * * *" },
     ]);
-    for (const job of jobs) await client.query(String(job["command"]));
+    for (const job of jobs) await query(client, String(job["command"]));
     assertEquals(await sql`select operation_id as operation, params, status from public.xquik_actions order by id`, [
       { operation: "getUser", params: { id: "NASA", note: "it's" }, status: "sent" },
       { operation: "getAccount", params: {}, status: "sent" },
@@ -357,13 +358,13 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
       ]);
       const [collect, cleanup] = jobs;
       await enqueueAnswered([200, "application/json", '{"ok": true}']);
-      await client.query(String(collect?.["command"]));
+      await query(client, String(collect?.["command"]));
       assertEquals(await sql`select status, response from public.xquik_actions`, [
         { status: "succeeded", response: { ok: true } },
       ]);
       await sql`insert into public.xquik_webhook_nonces (nonce, seen_at) values
       ('old', now() - interval '11 minutes'), ('recent', now() - interval '9 minutes'), ('fresh', now())`;
-      await client.query(String(cleanup?.["command"]));
+      await query(client, String(cleanup?.["command"]));
       assertEquals(await sql`select nonce from public.xquik_webhook_nonces order by nonce`, [
         { nonce: "fresh" },
         { nonce: "recent" },
@@ -379,7 +380,7 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
       values ('staleUnused', 'GET', '/unused', 'read'), ('staleUsed', 'GET', '/used', 'read')`;
       await sql`insert into public.xquik_actions (operation_id, status, request_id, finished_at)
       values ('staleUsed', 'failed', 1, now())`;
-      await client.query(await Deno.readTextFile(await latestRegistryMigration()));
+      await query(client, await Deno.readTextFile(latestRegistryMigration()));
       const spec: unknown = JSON.parse(await Deno.readTextFile(SPEC_PATH));
       const expected = [
         ...operationRows(spec).map(({ operationId, method, path, kind, listField }) => ({
