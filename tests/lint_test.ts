@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import strict from "../lint/strict.ts";
+import strict from "@/lint/strict.ts";
 
 function findings(source: string): string[] {
   return Deno.lint.runPlugin(strict, "source.ts", source).map((diagnostic) =>

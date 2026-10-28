@@ -1,68 +1,26 @@
-import { assert, assertArrayIncludes, assertEquals, assertExists, assertMatch, assertNotMatch } from "@std/assert";
-import { Client, DatabaseError } from "pg";
-import { z } from "zod";
-import { securityRequirements } from "../scripts/openapi.ts";
-import { withoutEmptyKinds } from "../scripts/types.ts";
-import { FOREIGN_TABLES_SUFFIX } from "../scripts/foreign_tables.ts";
-import { latestMigration, REGISTRY_SUFFIX, SPEC_PATH } from "../scripts/generate.ts";
-import { Constants } from "../supabase/functions/_shared/database.types.ts";
-
-type Row = Record<string, unknown>;
-type Reply = readonly [status: number, type: string | null, content: string | null];
+import { assert, assertEquals, assertMatch, assertNotMatch } from "@std/assert";
+import type { Database, SqlStep } from "@/tests/postgres.ts";
+import { database, inSequence, key } from "@/tests/postgres.ts";
+import callSteps from "@/tests/sql_call_test.ts";
+import { Client } from "pg";
+import { Constants } from "@shared/database.types.ts";
+import foreignTableSteps from "@/tests/sql_foreign_tables_test.ts";
+import normalizeTypes from "@/scripts/types.ts";
+import queueSteps from "@/tests/sql_queue_test.ts";
+import tableSteps from "@/tests/sql_tables_test.ts";
 
 const DENO = "node_modules/.bin/deno";
 const SUPABASE = "node_modules/.bin/supabase";
 const TYPES = "supabase/functions/_shared/database.types.ts";
-const XQUIK = "https://xquik.com";
-const KEY = { "x-api-key": "xq_test_key" };
-const CLIENT_ROLES = ["anon", "authenticated"];
-const TABLES = [
-  {
-    name: "xquik.operations",
-    column: "path",
-    row: "(operation_id, method, path, kind) values ('probe', 'GET', '/', 'read')",
-  },
-  {
-    name: "public.xquik_actions",
-    column: "params",
-    row: "(operation_id, status, request_id, finished_at) values ('getAccount', 'failed', 1, now())",
-  },
-  {
-    name: "public.xquik_events",
-    column: "payload",
-    row: "(stream_event_id, event_type, occurred_at, payload) values ('1', 'tweet.new', now(), '{}')",
-  },
-  { name: "public.xquik_webhook_nonces", column: "seen_at", row: "(nonce) values ('n')" },
-];
-const NO_JSON_ANSWER = ["downloadSupportAttachment", "streamEvents"];
 const PGTAP_VERSION = "1.3.4";
 const PGTAP_ARCHIVE = `https://api.pgxn.org/dist/pgtap/${PGTAP_VERSION}/pgtap-${PGTAP_VERSION}.zip`;
 const PGTAP_SHA256 = "2570574a9321082e82433768feb5bffe472ef2ced6b22608a86bfd25f2b88e40";
+const MAJOR_MINOR = 2;
+const HEX = 16;
+const BYTE_DIGITS = 2;
 const PROVE = ["--norc", "--failures", "--comments", "--directives", "--recurse", "--ext=.sql", "--ext=.pg"];
 const PSQL = "psql --no-psqlrc --no-align --quiet --tuples-only --pset=pager=off --set=ON_ERROR_STOP=1 --file";
-
-const spec = z.object({
-  security: securityRequirements,
-  paths: z.record(
-    z.string(),
-    z.object({ get: z.object({ operationId: z.string(), security: securityRequirements.optional() }).optional() }),
-  ),
-}).parse(JSON.parse(await Deno.readTextFile(SPEC_PATH)));
-const publicGets = Object.entries(spec.paths).flatMap(([path, { get }]) =>
-  get !== undefined &&
-    (get.security ?? spec.security).some((requirement) =>
-      Object.keys(requirement).length === 0 || "apiKey" in requirement
-    )
-    ? [{ table: get.operationId.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`), id: get.operationId, path }]
-    : []
-);
-const readable = publicGets.filter(({ id }) => !NO_JSON_ANSWER.includes(id));
-
-const catalogTables = z.array(z.object({
-  name: z.string(),
-  options: z.record(z.string(), z.string()),
-  columns: z.array(z.string()),
-}));
+const STEPS: readonly SqlStep[] = [...callSteps, ...queueSteps, ...tableSteps, ...foreignTableSteps];
 
 async function run(command: string, args: string[], env: Record<string, string> = {}): Promise<string> {
   const { success, stdout, stderr } = await new Deno.Command(command, { args, env }).output();
@@ -73,18 +31,25 @@ async function run(command: string, args: string[], env: Record<string, string> 
   return decoder.decode(stdout);
 }
 
-async function buildPgtap(dir: string): Promise<string> {
-  const archive = new Uint8Array(await (await fetch(PGTAP_ARCHIVE)).arrayBuffer());
+async function downloadPgtap(dir: string): Promise<void> {
+  const response = await fetch(PGTAP_ARCHIVE);
+  const archive = new Uint8Array(await response.arrayBuffer());
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", archive));
-  assertEquals(Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(""), PGTAP_SHA256, PGTAP_ARCHIVE);
+  const hex = Array.from(digest, (byte) => byte.toString(HEX).padStart(BYTE_DIGITS, "0")).join("");
+  assertEquals(hex, PGTAP_SHA256, PGTAP_ARCHIVE);
   await Deno.writeFile(`${dir}/pgtap.zip`, archive);
+}
+
+async function buildPgtap(dir: string): Promise<string> {
+  await downloadPgtap(dir);
   const source = `pgtap-${PGTAP_VERSION}`;
   await run("unzip", ["-q", `${dir}/pgtap.zip`, `${source}/pgtap.control`, `${source}/sql/pgtap.sql.in`, "-d", dir]);
   const extension = `${dir}/pgtap/extension`;
   await Deno.mkdir(extension, { recursive: true });
   await Deno.copyFile(`${dir}/${source}/pgtap.control`, `${extension}/pgtap.control`);
-  const script = (await Deno.readTextFile(`${dir}/${source}/sql/pgtap.sql.in`)).replaceAll("__OS__", Deno.build.os)
-    .replaceAll("__VERSION__", PGTAP_VERSION.split(".").slice(0, 2).join("."));
+  const template = await Deno.readTextFile(`${dir}/${source}/sql/pgtap.sql.in`);
+  const script = template.replaceAll("__OS__", Deno.build.os)
+    .replaceAll("__VERSION__", PGTAP_VERSION.split(".", MAJOR_MINOR).join("."));
   await Deno.writeTextFile(`${extension}/pgtap--${PGTAP_VERSION}.sql`, script);
   return `${dir}/pgtap`;
 }
@@ -100,7 +65,7 @@ async function startCluster(dir: string): Promise<void> {
     "-A",
     "trust",
     "-E",
-    "UTF8",
+    "utf8",
     "--locale=C",
     "--no-sync",
     "--no-instructions",
@@ -118,513 +83,49 @@ async function startCluster(dir: string): Promise<void> {
   });
 }
 
-async function query(client: Client, text: string, values: unknown[] = []): Promise<Row[]> {
-  return (await client.query<Row, unknown[]>(text, values)).rows;
+async function withCluster(body: (dir: string) => Promise<void>): Promise<void> {
+  const dir = await Deno.makeTempDir({ dir: "/tmp", prefix: "xquik-sql-" });
+  try {
+    await startCluster(dir);
+    try {
+      await body(dir);
+    } finally {
+      await run("pg_ctl", ["-D", `${dir}/data`, "-m", "fast", "-w", "stop"]);
+    }
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
 }
 
-async function latestSql(suffix: string): Promise<string> {
-  const file = latestMigration(suffix);
-  assertExists(file, `no *${suffix} migration`);
-  return await Deno.readTextFile(file);
+async function withDatabase(dir: string, body: (db: Database) => Promise<void>): Promise<void> {
+  const client = new Client({ database: "postgres", host: dir, user: "postgres" });
+  await client.connect();
+  try {
+    await body(database(client));
+  } finally {
+    await client.end();
+  }
 }
 
-async function applyMigrations(client: Client, url: string): Promise<void> {
-  await query(client, await Deno.readTextFile("tests/sql/supabase.sql"));
-  await run(SUPABASE, ["migration", "up", "--db-url", url], { XQUIK_API_KEY: KEY["x-api-key"] });
+async function applyMigrations(db: Database, url: string): Promise<void> {
+  await db.query(await Deno.readTextFile("tests/sql/supabase.sql"));
+  await run(SUPABASE, ["migration", "up", "--db-url", url], { XQUIK_API_KEY: key["x-api-key"] });
 }
 
-async function testFunctions(t: Deno.TestContext, client: Client): Promise<void> {
-  const sql = async (strings: TemplateStringsArray, ...values: unknown[]): Promise<Row[]> =>
-    await query(client, strings.reduce((text, part, index) => `${text}$${String(index)}${part}`), values);
-
-  const step = async (name: string, body: () => Promise<void>): Promise<boolean> =>
-    await t.step(name, async (): Promise<void> => {
-      await sql`begin`;
-      try {
-        await body();
-      } finally {
-        await sql`rollback`;
-      }
-    });
-
-  const failure = async (statement: () => Promise<unknown>): Promise<{ message: string; hint?: string }> => {
-    await sql`savepoint failure`;
-    const error = await statement().then(() => undefined, (reason: unknown) => reason);
-    await sql`rollback to savepoint failure`;
-    assert(error instanceof DatabaseError, "the statement fails");
-    return error.hint === undefined ? { message: error.message } : { message: error.message, hint: error.hint };
-  };
-
-  const reply = async (...[status, type, content]: Reply): Promise<void> => {
-    await sql`insert into extensions.http_replies (status, content_type, content) values (${status}, ${type}, ${content})`;
-  };
-
-  const httpCalls = async (): Promise<Row[]> =>
-    await sql`select (c.request).method, (c.request).uri as url,
-        (select jsonb_object_agg(h.field, h.value) from unnest((c.request).headers) h) as headers,
-        (c.request).content_type as type, (c.request).content::jsonb as body, c.curlopts
-      from extensions.http_calls c order by c.id`;
-
-  const enqueueAnswered = async ([status, type, content]: Reply): Promise<void> => {
-    const [action] = await sql`select xquik.enqueue('getAccount') as id`;
-    await sql`insert into net._http_response (id, status_code, content_type, content)
-      select request_id, ${status}, ${type}, ${content} from public.xquik_actions where id = ${action?.["id"]}`;
-  };
-
-  await step("xquik.call sends the method, URL, Vault key and JSON body with a 30 second timeout", async () => {
-    await reply(201, "application/json", '{"id": "1"}');
-    assertEquals(await sql`select xquik.call('createTweet', '{"text": "hi"}') as answer`, [{ answer: { id: "1" } }]);
-    assertEquals(await httpCalls(), [{
-      method: "POST",
-      url: `${XQUIK}/api/v1/x/tweets`,
-      headers: KEY,
-      type: "application/json",
-      body: { text: "hi" },
-      curlopts: { CURLOPT_TIMEOUT_MS: "30000" },
-    }]);
-  });
-
-  await step("xquik.call fills path parameters and sends the rest as a query for GET and DELETE", async () => {
-    await reply(200, "application/json", "{}");
-    await sql`select xquik.call('getUser', '{"id": "a b+c/d", "probe": "x y&z"}')`;
-    await sql`select xquik.call('deleteDm', '{"userId": 1, "messageId": "m 2"}')`;
-    await sql`select xquik.call('getAccount')`;
-    await sql`select xquik.call('getAccount', null)`;
-    await sql`select xquik.call('updateAccount')`;
-    assertEquals((await httpCalls()).map(({ method, url, type, body }) => ({ method, url, type, body })), [
-      { method: "GET", url: `${XQUIK}/api/v1/x/users/a%20b%2Bc%2Fd?probe=x+y%26z`, type: null, body: null },
-      { method: "DELETE", url: `${XQUIK}/api/v1/x/dm/1/messages/m%202`, type: null, body: null },
-      { method: "GET", url: `${XQUIK}/api/v1/account`, type: null, body: null },
-      { method: "GET", url: `${XQUIK}/api/v1/account`, type: null, body: null },
-      { method: "PATCH", url: `${XQUIK}/api/v1/account`, type: "application/json", body: {} },
-    ]);
-  });
-
-  await step("xquik.call sends to the xquik_base_url Vault secret without its trailing slash", async () => {
-    await reply(200, "application/json", "{}");
-    await reply(201, "application/json", "{}");
-    await sql`select vault.create_secret('http://localhost:8080/', 'xquik_base_url')`;
-    await sql`select xquik.call('getAccount')`;
-    await sql`select xquik.call('createTweet', '{"text": "hi"}')`;
-    assertEquals((await httpCalls()).map((call) => call["url"]), [
-      "http://localhost:8080/api/v1/account",
-      "http://localhost:8080/api/v1/x/tweets",
-    ]);
-  });
-
-  await step(
-    "xquik.call rejects an unknown operation, non-object parameters and a missing path parameter",
-    async () => {
-      assertEquals(
-        [
-          await failure(async () => await sql`select xquik.call('nope')`),
-          await failure(async () => await sql`select xquik.call('getAccount', '[]')`),
-          await failure(async () => await sql`select xquik.call('getUser', '{}')`),
-          await failure(async () => await sql`select xquik.call('getUser', '{"id": null}')`),
-        ],
-        [
-          {
-            message: "Unknown Xquik operation nope",
-            hint: "List operation ids with select operation_id from xquik.operations.",
-          },
-          { message: "Pass the parameters of getAccount as a JSON object" },
-          { message: "Xquik operation getUser needs the id parameter" },
-          { message: "Xquik operation getUser needs the id parameter" },
-        ],
-      );
-    },
-  );
-
-  await step("xquik.call raises with a Vault hint when the xquik_api_key secret is empty or missing", async () => {
-    await reply(200, "application/json", "{}");
-    await sql`update vault.secrets set secret = '' where name = 'xquik_api_key'`;
-    const empty = await failure(async () => await sql`select xquik.call('getAccount')`);
-    await sql`delete from vault.secrets where name = 'xquik_api_key'`;
-    const missing = await failure(async () => await sql`select xquik.call('getAccount')`);
-    const expected = {
-      message: "The xquik_api_key Vault secret is missing",
-      hint: "Run select vault.create_secret('<your key>', 'xquik_api_key').",
-    };
-    assertEquals([empty, missing], [expected, expected]);
-  });
-
-  await step(
-    "xquik.call returns a 2xx answer as JSON, other text as a JSON string and no content as null",
-    async () => {
-      const answers: [Reply, unknown][] = [
-        [[200, "application/json", '{"id": "1"}'], { id: "1" }],
-        [[299, "Application/Problem+JSON; charset=utf-8", "[1]"], [1]],
-        [[200, "text/plain", "pong"], "pong"],
-        [[200, null, "pong"], "pong"],
-        [[204, "application/json", ""], null],
-        [[204, null, null], null],
-      ];
-      for (const [sent, expected] of answers) {
-        await reply(...sent);
-        assertEquals(await sql`select xquik.call('getAccount') as answer`, [{ answer: expected }], String(sent));
-      }
-    },
-  );
-
-  await step("xquik.call raises the HTTP status with Xquik's error and message, or with the raw answer", async () => {
-    const failures: [Reply, string][] = [
-      [
-        [404, "application/json", '{"error": "user_not_found", "message": "No user has that handle."}'],
-        "HTTP 404. user_not_found. No user has that handle.",
-      ],
-      [[429, "application/json", '{"error": "rate_limited"}'], "HTTP 429. rate_limited"],
-      [[500, "application/json", '{"message": "Try again."}'], "HTTP 500. Try again."],
-      [[300, "application/json", '{"location": "/x"}'], 'HTTP 300. {"location": "/x"}'],
-      [[502, "text/html", "<h1>Bad gateway</h1>"], "HTTP 502. <h1>Bad gateway</h1>"],
-    ];
-    for (const [sent, expected] of failures) {
-      await reply(...sent);
-      assertEquals(await failure(async () => await sql`select xquik.call('getAccount')`), {
-        message: `Xquik getAccount returned ${expected}`,
-      });
+async function inTransaction(context: Deno.TestContext, db: Database, { name, run: body }: SqlStep): Promise<boolean> {
+  return await context.step(name, async (): Promise<void> => {
+    await db.sql`begin`;
+    try {
+      await body(db);
+    } finally {
+      await db.sql`rollback`;
     }
   });
+}
 
-  await step("xquik.rows returns 1 row per item of the list field, or else the whole answer", async () => {
-    const answers: [string, string, unknown[]][] = [
-      ["searchTweets", '{"tweets": [{"id": "1"}, {"id": "2"}]}', [{ id: "1" }, { id: "2" }]],
-      ["searchTweets", '{"tweets": []}', []],
-      ["searchTweets", '{"tweets": {"id": "1"}}', [{ tweets: { id: "1" } }]],
-      ["getAccount", '{"tweets": [1, 2]}', [{ tweets: [1, 2] }]],
-    ];
-    for (const [operation, content, expected] of answers) {
-      await reply(200, "application/json", content);
-      const rows = await sql`select r as item from xquik.rows(${operation}) r`;
-      assertEquals(rows.map((row) => row["item"]), expected, `${operation} ${content}`);
-    }
-  });
-
-  await step(
-    "xquik.enqueue sends GET, POST and DELETE actions with pg_net, the Vault key and a 30 second timeout",
-    async () => {
-      await sql`select xquik.enqueue('getUser', '{"id": "NASA", "probe": "x y"}')`;
-      await sql`select xquik.enqueue('createTweet', '{"text": "hi"}')`;
-      await sql`select xquik.enqueue('cancelExtraction', '{"id": "7"}')`;
-      await sql`select xquik.enqueue('getAccount')`;
-      const headers = { ...KEY, "Content-Type": "application/json" };
-      const sent = { status: "sent", headers, timeout: 30000 };
-      assertEquals(
-        await sql`select a.operation_id as operation, a.params, a.status, q.method, q.url, q.headers, q.body,
-          q.timeout_milliseconds::integer as timeout
-        from public.xquik_actions a join net.http_request_queue q on q.id = a.request_id order by a.id`,
-        [
-          {
-            ...sent,
-            operation: "getUser",
-            params: { id: "NASA", probe: "x y" },
-            method: "GET",
-            url: `${XQUIK}/api/v1/x/users/NASA?probe=x+y`,
-            body: null,
-          },
-          {
-            ...sent,
-            operation: "createTweet",
-            params: { text: "hi" },
-            method: "POST",
-            url: `${XQUIK}/api/v1/x/tweets`,
-            body: { text: "hi" },
-          },
-          {
-            ...sent,
-            operation: "cancelExtraction",
-            params: { id: "7" },
-            method: "DELETE",
-            url: `${XQUIK}/api/v1/extractions/7`,
-            body: null,
-          },
-          { ...sent, operation: "getAccount", params: {}, method: "GET", url: `${XQUIK}/api/v1/account`, body: null },
-        ],
-      );
-    },
-  );
-
-  await step("the send trigger leaves a row inserted with another status unsent", async () => {
-    await sql`insert into public.xquik_actions (operation_id, status, request_id) values ('getUser', 'sent', 42)`;
-    assertEquals(await sql`select status, request_id::integer as request from public.xquik_actions`, [
-      { status: "sent", request: 42 },
-    ]);
-    assertEquals(await sql`select id from net.http_request_queue`, []);
-  });
-
-  await step("xquik.enqueue rejects PATCH and PUT operations, which pg_net cannot send", async () => {
-    const hint = "Run it with select xquik.call(...) instead.";
-    assertEquals(
-      [
-        await failure(async () => await sql`select xquik.enqueue('updateAccount')`),
-        await failure(async () => await sql`select xquik.enqueue('saveStyle', '{"id": "1"}')`),
-      ],
-      [
-        { message: "Xquik operation updateAccount uses PATCH, and pg_net sends only GET, POST and DELETE", hint },
-        { message: "Xquik operation saveStyle uses PUT, and pg_net sends only GET, POST and DELETE", hint },
-      ],
-    );
-  });
-
-  await step("xquik.collect finishes each action pg_net answered and leaves the rest sent", async () => {
-    await enqueueAnswered([200, "application/json", '{"ok": true}']);
-    await enqueueAnswered([404, "application/json", '{"error": "user_not_found"}']);
-    await enqueueAnswered([204, null, ""]);
-    await enqueueAnswered([200, "text/plain", "pong"]);
-    await enqueueAnswered([300, "application/json", '{"moved": true}']);
-    const [timedOut] = await sql`select xquik.enqueue('getAccount') as id`;
-    await sql`insert into net._http_response (id, error_msg)
-      select request_id, 'Timeout of 30000 ms reached' from public.xquik_actions where id = ${timedOut?.["id"]}`;
-    await sql`select xquik.enqueue('getAccount')`;
-    assertEquals(await sql`select xquik.collect() as finished`, [{ finished: 6 }]);
-    assertEquals(
-      await sql`select status, http_status::integer as code, response, finished_at is not null as finished
-        from public.xquik_actions order by id`,
-      [
-        { status: "succeeded", code: 200, response: { ok: true }, finished: true },
-        { status: "failed", code: 404, response: { error: "user_not_found" }, finished: true },
-        { status: "succeeded", code: 204, response: null, finished: true },
-        { status: "succeeded", code: 200, response: "pong", finished: true },
-        { status: "failed", code: 300, response: { moved: true }, finished: true },
-        { status: "failed", code: null, response: { error: "Timeout of 30000 ms reached" }, finished: true },
-        { status: "sent", code: null, response: null, finished: false },
-      ],
-    );
-    assertEquals(await sql`select xquik.collect() as finished`, [{ finished: 0 }]);
-  });
-
-  await step("xquik.schedule checks the operation, then schedules a job that enqueues it", async () => {
-    assertEquals(
-      [
-        await failure(async () => await sql`select xquik.schedule('job', '* * * * *', 'nope')`),
-        await failure(async () => await sql`select xquik.schedule('job', '* * * * *', 'updateAccount')`),
-      ].map(({ message }) => message),
-      [
-        "Unknown Xquik operation nope",
-        "Xquik operation updateAccount uses PATCH, and pg_net sends only GET, POST and DELETE",
-      ],
-    );
-    const [nasa] = await sql`select xquik.schedule('nasa', '*/15 * * * *', 'getUser',
-      '{"id": "NASA", "note": "it''s"}') as id`;
-    const [account] = await sql`select xquik.schedule('account', '0 * * * *', 'getAccount') as id`;
-    const jobs = await sql`select jobid as id, jobname as name, schedule, command from cron.job
-      where jobname in ('nasa', 'account') order by jobid`;
-    assertEquals(jobs.map(({ id, name, schedule }) => ({ id, name, schedule })), [
-      { id: nasa?.["id"], name: "nasa", schedule: "*/15 * * * *" },
-      { id: account?.["id"], name: "account", schedule: "0 * * * *" },
-    ]);
-    for (const job of jobs) await query(client, String(job["command"]));
-    assertEquals(await sql`select operation_id as operation, params, status from public.xquik_actions order by id`, [
-      { operation: "getUser", params: { id: "NASA", note: "it's" }, status: "sent" },
-      { operation: "getAccount", params: {}, status: "sent" },
-    ]);
-  });
-
-  await step(
-    "the migration schedules xquik-collect every 10 seconds and drops nonces older than 10 minutes",
-    async () => {
-      const jobs = await sql`select jobname as name, schedule, command from cron.job
-      where jobname like 'xquik-%' order by jobname`;
-      assertEquals(jobs.map(({ name, schedule }) => ({ name, schedule })), [
-        { name: "xquik-collect", schedule: "10 seconds" },
-        { name: "xquik-nonce-cleanup", schedule: "*/5 * * * *" },
-      ]);
-      const [collect, cleanup] = jobs;
-      await enqueueAnswered([200, "application/json", '{"ok": true}']);
-      await query(client, String(collect?.["command"]));
-      assertEquals(await sql`select status, response from public.xquik_actions`, [
-        { status: "succeeded", response: { ok: true } },
-      ]);
-      await sql`insert into public.xquik_webhook_nonces (nonce, seen_at) values
-      ('old', now() - interval '11 minutes'), ('recent', now() - interval '9 minutes'), ('fresh', now())`;
-      await query(client, String(cleanup?.["command"]));
-      assertEquals(await sql`select nonce from public.xquik_webhook_nonces order by nonce`, [
-        { nonce: "fresh" },
-        { nonce: "recent" },
-      ]);
-    },
-  );
-
-  const plannedIndexes = async (statement: string): Promise<string[]> => {
-    const plan = JSON.stringify(await query(client, `explain (format json) ${statement}`));
-    return [...plan.matchAll(/"Index Name":"([^"]+)"/g)].map(([, name]) => String(name));
-  };
-
-  await step("row level security denies anon and authenticated every operation even after a grant", async () => {
-    const outcomes: Record<string, unknown>[] = [];
-    for (const table of TABLES) {
-      await query(client, `insert into ${table.name} ${table.row} on conflict do nothing`);
-      for (const role of CLIENT_ROLES) {
-        await query(client, `grant usage on schema xquik to ${role}`);
-        await query(client, `grant select, insert, update, delete on ${table.name} to ${role}`);
-        await query(client, `set local role ${role}`);
-        const count = async (statement: string): Promise<unknown> =>
-          (await query(client, `with hit as (${statement} returning 1) select count(*)::integer as n from hit`))[0]
-            ?.["n"];
-        const [read] = await query(client, `select count(*)::integer as n from ${table.name}`);
-        outcomes.push({
-          role,
-          table: table.name,
-          read: read?.["n"],
-          changed: await count(`update ${table.name} set ${table.column} = ${table.column}`),
-          removed: await count(`delete from ${table.name}`),
-          added: (await failure(async () => await query(client, `insert into ${table.name} ${table.row}`))).message,
-        });
-        await sql`reset role`;
-      }
-    }
-    assertEquals(
-      outcomes,
-      TABLES.flatMap((table) =>
-        CLIENT_ROLES.map((role) => ({
-          role,
-          table: table.name,
-          read: 0,
-          changed: 0,
-          removed: 0,
-          added: `new row violates row-level security policy for table "${String(table.name.split(".")[1])}"`,
-        }))
-      ),
-    );
-  });
-
-  await step("xquik.collect finds the sent actions among finished ones through xquik_actions_sent", async () => {
-    await sql`insert into public.xquik_actions (operation_id, status, request_id, finished_at)
-      select 'getAccount', 'succeeded', n, now() from generate_series(1, 10000) n`;
-    await enqueueAnswered([200, "application/json", '{"ok": true}']);
-    await sql`analyze public.xquik_actions`;
-    const [collect] = await sql`select prosrc as source from pg_proc where oid = 'xquik.collect'::regproc`;
-    assertArrayIncludes(await plannedIndexes(String(collect?.["source"])), ["xquik_actions_sent"]);
-    assertEquals(await sql`select xquik.collect() as finished`, [{ finished: 1 }]);
-  });
-
-  await step("reading events in order walks xquik_events_order", async () => {
-    await sql`insert into public.xquik_events (stream_event_id, event_type, occurred_at, payload)
-      select n::text, 'tweet.new', timestamptz '2026-10-28' + n * interval '1 second', '{}' from generate_series(1, 10000) n`;
-    await sql`analyze public.xquik_events`;
-    const ordered = "select stream_event_id from public.xquik_events order by occurred_at, stream_event_id limit 100";
-    assertArrayIncludes(await plannedIndexes(ordered), ["xquik_events_order"]);
-    assertEquals((await query(client, ordered)).length, 100);
-  });
-
-  await step(
-    "rerunning the registry migration restores changed operations and drops stale ones no action uses, looking up their actions through xquik_actions_operation_id",
-    async () => {
-      await sql`update xquik.operations set path = '/old', list_field = 'old' where operation_id = 'getUser'`;
-      await sql`insert into public.xquik_actions (operation_id, status, request_id, finished_at)
-      select o.operation_id, 'succeeded', n, now() from xquik.operations o, generate_series(1, 100) n`;
-      await sql`insert into xquik.operations (operation_id, method, path, kind)
-      values ('staleUnused', 'GET', '/unused', 'read'), ('staleUsed', 'GET', '/used', 'read')`;
-      await sql`insert into public.xquik_actions (operation_id, status, request_id, finished_at)
-      values ('staleUsed', 'failed', 1, now())`;
-      await sql`analyze public.xquik_actions`;
-      const registry = await latestSql(REGISTRY_SUFFIX);
-      assertArrayIncludes(await plannedIndexes(registry), ["xquik_actions_operation_id"]);
-      await query(client, registry);
-      assertEquals(
-        await sql`select operation_id as operation, method, path, kind, list_field as list
-        from xquik.operations where operation_id in ('getUser', 'staleUnused', 'staleUsed') order by operation_id`,
-        [
-          { operation: "getUser", method: "GET", path: "/api/v1/x/users/{id}", kind: "read", list: null },
-          { operation: "staleUsed", method: "GET", path: "/used", kind: "read", list: null },
-        ],
-      );
-    },
-  );
-
-  const foreignTablesMigration = await latestSql(FOREIGN_TABLES_SUFFIX);
-  const foreignTables = async (): Promise<z.infer<typeof catalogTables>> =>
-    catalogTables.parse(
-      await sql`select c.relname as name,
-          (select jsonb_object_agg(option_name, option_value) from pg_options_to_table(t.ftoptions)) as options,
-          array(select format('%s %s', a.attname, format_type(a.atttypid, a.atttypmod)) from pg_attribute a
-            where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped order by a.attnum) as columns
-        from pg_foreign_table t join pg_class c on c.oid = t.ftrelid
-        where c.relnamespace = 'xquik'::regnamespace order by c.relname`,
-    );
-  const oids = async (): Promise<Row[]> =>
-    await sql`select relname as name, oid from pg_class
-      where relnamespace = 'xquik'::regnamespace and relkind = 'f' order by relname`;
-
-  await step(
-    "every public GET operation that answers with JSON has a foreign table on its path with its path parameters",
-    async () => {
-      const tables = new Map((await foreignTables()).map((table) => [table.name, table]));
-      console.log(`${String(tables.size)} of ${String(publicGets.length)} public GET operations have a foreign table.`);
-      assertEquals(NO_JSON_ANSWER.filter((id) => publicGets.some((read) => read.id === id)), NO_JSON_ANSWER);
-      assertEquals([...tables.keys()].toSorted(), readable.map(({ table }) => table).toSorted());
-      for (const { table: name, path } of readable) {
-        const table = tables.get(name);
-        assertEquals(table?.options["endpoint"]?.split("?")[0], path, name);
-        const columns = table?.columns.map((column) => column.split(" ")[0]) ?? [];
-        const placeholders = [...path.matchAll(/\{([^}]+)\}/g)].map(([, placeholder]) => placeholder);
-        assertEquals(placeholders.filter((placeholder) => !columns.includes(placeholder)), [], name);
-        assertEquals(table?.columns.at(-1), "attrs jsonb", name);
-      }
-    },
-  );
-
-  await step("list reads unwrap their list and page by their cursor, single reads keep the whole answer", async () => {
-    const tables = new Map((await foreignTables()).map(({ name, options, columns }) => [name, { options, columns }]));
-    assertEquals(tables.get("search_tweets")?.options, {
-      endpoint: "/api/v1/x/tweets/search",
-      response_path: "/tweets",
-      cursor_param: "cursor",
-      cursor_path: "/next_cursor",
-    });
-    assertEquals(tables.get("list_draws")?.options, {
-      endpoint: "/api/v1/draws",
-      response_path: "/draws",
-      cursor_param: "cursor",
-      cursor_path: "/nextCursor",
-    });
-    assertEquals(tables.get("list_drafts")?.options["cursor_param"], "afterCursor");
-    assertEquals(tables.get("list_drafts")?.options["cursor_path"], "/nextCursor");
-    assertEquals(tables.get("get_user")?.options, { endpoint: "/api/v1/x/users/{id}", response_path: "" });
-    assertEquals(tables.get("export_draw"), {
-      columns: ["id text", "type text", "attrs jsonb"],
-      options: { endpoint: "/api/v1/draws/{id}/export?format=json", response_path: "" },
-    });
-  });
-
-  await step(
-    "rerunning the foreign tables migration rebuilds only changed tables, drops stale ones and keeps the rest",
-    async () => {
-      const fresh = await foreignTables();
-      const freshOids = new Map((await oids()).map(({ name, oid }) => [name, oid]));
-      await sql`create view public.nasa_profile as select attrs from xquik.get_user where id = 'NASA'`;
-      await sql`alter server xquik_server options (set max_pages '50')`;
-      await sql`alter foreign table xquik.search_tweets options (set endpoint '/old')`;
-      await sql`alter foreign table xquik.list_draws add column extra text`;
-      await sql`create foreign table xquik.stale_read (attrs jsonb) server xquik_server options (endpoint '/stale')`;
-      await query(client, foreignTablesMigration);
-      assertEquals(await foreignTables(), fresh);
-      assertEquals(
-        (await oids()).filter(({ name, oid }) => freshOids.get(name) !== oid).map(({ name }) => name),
-        ["list_draws", "search_tweets"],
-      );
-      assertEquals(await sql`select count(*)::int as views from pg_views where viewname = 'nasa_profile'`, [{
-        views: 1,
-      }]);
-      assertEquals(
-        await sql`select option_value as pages from pg_options_to_table(
-          (select srvoptions from pg_foreign_server where srvname = 'xquik_server')) where option_name = 'max_pages'`,
-        [{ pages: "50" }],
-      );
-    },
-  );
-
-  await step("a view on a changed foreign table stops the foreign tables migration until you drop it", async () => {
-    const fresh = await foreignTables();
-    await sql`create view public.nasa_posts as select attrs from xquik.search_tweets where q = 'NASA'`;
-    await sql`alter foreign table xquik.search_tweets options (set endpoint '/old')`;
-    assertEquals(await failure(async () => await query(client, foreignTablesMigration)), {
-      message: "cannot drop foreign table xquik.search_tweets because other objects depend on it",
-      hint: "Use DROP ... CASCADE to drop the dependent objects too.",
-    });
-    await sql`drop view public.nasa_posts`;
-    await query(client, foreignTablesMigration);
-    assertEquals(await foreignTables(), fresh);
-  });
+async function testSteps(context: Deno.TestContext, db: Database): Promise<void> {
+  const passed = await inSequence(STEPS, async (step) => await inTransaction(context, db, step));
+  assertEquals(passed, STEPS.map(() => true), "every SQL step runs and passes");
 }
 
 async function formatted(source: string): Promise<string> {
@@ -637,46 +138,43 @@ async function formatted(source: string): Promise<string> {
   return new TextDecoder().decode(stdout);
 }
 
-async function testPgtap(t: Deno.TestContext, client: Client, dir: string): Promise<void> {
-  await t.step("every pgTAP test passes with no skip or todo, and each file runs exactly its plan", async () => {
-    await query(client, "create extension pgtap with schema extensions");
+async function testPgtap(context: Deno.TestContext, db: Database, dir: string): Promise<void> {
+  await context.step("every pgTAP test passes with no skip or todo, and each file runs exactly its plan", async () => {
+    await db.query("create extension pgtap with schema extensions");
     try {
       const report = await run(
         "prove",
         [...PROVE, "--exec", PSQL, "supabase/tests"],
-        { PGHOST: dir, PGUSER: "postgres", PGDATABASE: "postgres", PGOPTIONS: "-c search_path=public,extensions" },
+        { PGDATABASE: "postgres", PGHOST: dir, PGOPTIONS: "-c search_path=public,extensions", PGUSER: "postgres" },
       );
-      assertMatch(report, /^Result: PASS$/m);
-      assertNotMatch(report, /# (?:skip|todo)\b|skipped:/i);
+      assertMatch(report, /^Result: PASS$/mu);
+      assertNotMatch(report, /# (?:skip|todo)\b|skipped:/iu);
     } finally {
-      await query(client, "drop extension pgtap");
+      await db.query("drop extension pgtap");
     }
   });
 }
 
-async function testCli(t: Deno.TestContext, client: Client, url: string): Promise<void> {
-  await t.step("the Supabase advisors report nothing at any level", async () => {
-    await query(client, "select pg_stat_force_next_flush()");
+async function testCli(context: Deno.TestContext, db: Database, url: string): Promise<void> {
+  await context.step("the Supabase advisors report nothing at any level", async () => {
+    await db.query("select pg_stat_force_next_flush()");
     await run(SUPABASE, ["db", "advisors", "--db-url", url, "--type", "all", "--level", "info", "--fail-on", "info"]);
   });
 
-  await t.step(`${TYPES} matches supabase gen types for the public schema`, async () => {
+  await context.step(`${TYPES} matches supabase gen types for the public schema`, async () => {
     const generated = await run(SUPABASE, ["gen", "types", "typescript", "--db-url", url, "--schema", "public"]);
-    assertEquals(
-      await Deno.readTextFile(TYPES),
-      await formatted(withoutEmptyKinds(await formatted(generated))),
-      "Run deno task types.",
-    );
+    const expected = await formatted(normalizeTypes(await formatted(generated)));
+    assertEquals(await Deno.readTextFile(TYPES), expected, "Run deno task types.");
     assertEquals(Constants, { public: { Enums: {} } }, "the public schema defines no enum types");
   });
 
-  await t.step("rerunning the index migration rebuilds an index that a failed build left invalid", async () => {
+  await context.step("rerunning the index migration rebuilds an index that a failed build left invalid", async () => {
     const index = "'public.xquik_actions_operation_id'::regclass";
-    await query(client, `update pg_catalog.pg_index set indisvalid = false where indexrelid = ${index}`);
-    await query(client, "delete from supabase_migrations.schema_migrations where version = '20261028150128'");
-    await run(SUPABASE, ["migration", "up", "--include-all", "--db-url", url], { XQUIK_API_KEY: KEY["x-api-key"] });
+    await db.query(`update pg_catalog.pg_index set indisvalid = false where indexrelid = ${index}`);
+    await db.query("delete from supabase_migrations.schema_migrations where version = '20261028150128'");
+    await run(SUPABASE, ["migration", "up", "--include-all", "--db-url", url], { XQUIK_API_KEY: key["x-api-key"] });
     assertEquals(
-      await query(client, `select indisvalid as valid from pg_catalog.pg_index where indexrelid = ${index}`),
+      await db.query(`select indisvalid as valid from pg_catalog.pg_index where indexrelid = ${index}`),
       [
         { valid: true },
       ],
@@ -684,26 +182,14 @@ async function testCli(t: Deno.TestContext, client: Client, url: string): Promis
   });
 }
 
-Deno.test("the SQL functions and triggers on a throwaway Postgres 18 cluster", async (t) => {
-  const dir = await Deno.makeTempDir({ dir: "/tmp", prefix: "xquik-sql-" });
-  try {
-    await startCluster(dir);
-    try {
-      const client = new Client({ host: dir, user: "postgres", database: "postgres" });
-      const url = `postgresql://localhost/postgres?user=postgres&host=${encodeURIComponent(dir)}`;
-      await client.connect();
-      try {
-        await applyMigrations(client, url);
-        await testFunctions(t, client);
-        await testPgtap(t, client, dir);
-        await testCli(t, client, url);
-      } finally {
-        await client.end();
-      }
-    } finally {
-      await run("pg_ctl", ["-D", `${dir}/data`, "-m", "fast", "-w", "stop"]);
-    }
-  } finally {
-    await Deno.remove(dir, { recursive: true });
-  }
+Deno.test("the SQL functions and triggers on a throwaway Postgres 18 cluster", async (context) => {
+  await withCluster(async (dir) => {
+    const url = `postgresql://localhost/postgres?user=postgres&host=${encodeURIComponent(dir)}`;
+    await withDatabase(dir, async (db) => {
+      await applyMigrations(db, url);
+      await testSteps(context, db);
+      await testPgtap(context, db, dir);
+      await testCli(context, db, url);
+    });
+  });
 });

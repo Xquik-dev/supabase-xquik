@@ -4,14 +4,23 @@
     "typescript",
     "unicorn",
     "oxc",
+    "react",
+    "nextjs",
     "import",
     "jsdoc",
+    "jsx-a11y",
     "node",
-    "promise"
+    "promise",
+    "jest"
   ],
   "categories": {
     "correctness": "error",
-    "suspicious": "error"
+    "suspicious": "error",
+    "pedantic": "error",
+    "perf": "error",
+    "style": "error",
+    "restriction": "error",
+    "nursery": "error"
   },
   "env": {
     "browser": true,
@@ -26,6 +35,163 @@
     "reportUnusedDisableDirectives": "error"
   },
   "rules": {
+    "eslint/complexity": [
+      "error",
+      {
+        "max": 10
+      }
+    ],
+    "eslint/func-style": [
+      "error",
+      "declaration",
+      {
+        "allowArrowFunctions": true
+      }
+    ],
+    "eslint/max-depth": [
+      "error",
+      {
+        "max": 3
+      }
+    ],
+    "eslint/max-params": [
+      "error",
+      {
+        "max": 4
+      }
+    ],
+    "eslint/new-cap": [
+      "error",
+      {
+        "capIsNew": false
+      }
+    ],
+    "eslint/no-duplicate-imports": [
+      "error",
+      {
+        "allowSeparateTypeImports": true,
+        "includeExports": true
+      }
+    ],
+    "eslint/no-inner-declarations": [
+      "error",
+      "both",
+      {
+        "blockScopedFunctions": "disallow"
+      }
+    ],
+    "eslint/no-magic-numbers": [
+      "error",
+      {
+        "ignoreArrayIndexes": true,
+        "ignoreDefaultValues": true,
+        "enforceConst": true,
+        "detectObjects": false
+      }
+    ],
+    "eslint/no-param-reassign": [
+      "error",
+      {
+        "props": true
+      }
+    ],
+    "eslint/no-restricted-exports": [
+      "error",
+      {
+        "restrictedNamedExports": [
+          "then"
+        ]
+      }
+    ],
+    "eslint/no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          {
+            "name": "child_process",
+            "message": "Run a subprocess with Deno.Command."
+          },
+          {
+            "name": "node:child_process",
+            "message": "Run a subprocess with Deno.Command."
+          },
+          {
+            "name": "node:fs",
+            "message": "Read and write files with the Deno file APIs."
+          },
+          {
+            "name": "node:fs/promises",
+            "message": "Read and write files with the Deno file APIs."
+          }
+        ]
+      }
+    ],
+    "eslint/no-underscore-dangle": [
+      "error",
+      {
+        "allowInArrayDestructuring": false,
+        "allowInObjectDestructuring": false,
+        "enforceInClassFields": true,
+        "enforceInMethodNames": true
+      }
+    ],
+    "eslint/no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^$",
+        "caughtErrorsIgnorePattern": "^$",
+        "destructuredArrayIgnorePattern": "^$",
+        "ignoreRestSiblings": true,
+        "ignoreUsingDeclarations": true,
+        "varsIgnorePattern": "^$"
+      }
+    ],
+    "eslint/no-use-before-define": [
+      "error",
+      {
+        "functions": false,
+        "classes": true,
+        "variables": true,
+        "typedefs": false,
+        "enums": true,
+        "ignoreTypeReferences": true
+      }
+    ],
+    "eslint/no-void": [
+      "error",
+      {
+        "allowAsStatement": false
+      }
+    ],
+    "eslint/one-var": [
+      "error",
+      "never"
+    ],
+    "eslint/sort-imports": [
+      "error",
+      {
+        "ignoreCase": true
+      }
+    ],
+    "import/no-default-export": "off",
+    "import/no-named-export": "off",
+    "jest/require-hook": "off",
+    "node/no-sync": [
+      "error",
+      {
+        "allowAtRootLevel": true
+      }
+    ],
+    "node/no-top-level-await": "off",
+    "oxc/no-async-await": "off",
+    "oxc/no-optional-chaining": "off",
+    "oxc/no-rest-spread-properties": "off",
+    "typescript/array-type": [
+      "error",
+      {
+        "default": "array-simple"
+      }
+    ],
     "typescript/consistent-type-exports": "error",
     "typescript/dot-notation": [
       "error",
@@ -63,6 +229,7 @@
     "typescript/prefer-optional-chain": "error",
     "typescript/prefer-promise-reject-errors": "error",
     "typescript/prefer-readonly": "error",
+    "typescript/prefer-readonly-parameter-types": "off",
     "typescript/prefer-reduce-type-parameter": "error",
     "typescript/prefer-regexp-exec": "error",
     "typescript/prefer-return-this-type": "error",
@@ -98,6 +265,13 @@
     "typescript/strict-boolean-expressions": "error",
     "typescript/strict-void-return": "error",
     "typescript/switch-exhaustiveness-check": "error",
-    "typescript/use-unknown-in-catch-callback-variable": "error"
+    "typescript/use-unknown-in-catch-callback-variable": "error",
+    "unicorn/filename-case": [
+      "error",
+      {
+        "case": "snakeCase"
+      }
+    ],
+    "unicorn/no-null": "off"
   }
 }

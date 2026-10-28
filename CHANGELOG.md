@@ -27,3 +27,6 @@
   functions drops below a minimum.
 - Add fast-check property tests for the webhook signature check, the secret
   list, the `askDocs` answers and the SQL quoting.
+- Fail the checks on any finding of the oxlint categories and plugins that the
+  Xquik app turns on. `getSportsGameView` takes the game in 1 options object,
+  and `xquik-webhook` no longer writes console logs.

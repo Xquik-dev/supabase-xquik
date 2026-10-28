@@ -1,8 +1,23 @@
 import { assertEquals, assertRejects } from "@std/assert";
-import { type Mutant, mutantsOf, type Result, runMutants, score, summary } from "../scripts/mutation.ts";
+import { runMutants, score, summary } from "@/scripts/mutation.ts";
+import type { Mutant } from "@/scripts/mutants.ts";
+import mutantsOf from "@/scripts/mutants.ts";
+import type { Result } from "@/scripts/mutation.ts";
 
-const REPO = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const REPO = new URL("..", import.meta.url).pathname.replace(/\/$/u, "");
 const SCRIPT = `${REPO}/scripts/mutate.ts`;
+const GUARD_LINE = 4;
+const LOG_LINE = 5;
+const OPERATORS_LINE = 6;
+const RETURN_LINE = 7;
+const SQL_IF_LINE = 4;
+const SQL_FOUND_LINE = 5;
+const SQL_CASE_LINE = 6;
+const SQL_CHAIN_LINE = 7;
+const ONE_WORKER = 1;
+const TWO_WORKERS = 2;
+const TWO_THIRDS_SCORE = 66.67;
+const LAST = -1;
 
 const TYPESCRIPT = `import { log } from "./log.ts";
 type Flag = "on" | true;
@@ -38,7 +53,7 @@ export function unused(): boolean {
 
 const NOTES = "create function one() returns int language sql as $$ select 1 $$;\n";
 
-const MATH_TEST = `import { add } from "../math.ts";
+const MATH_TEST = `import { add } from "@/math.ts";
 Deno.test("adds", () => {
   if (add(2, 3) !== 5) throw new Error("add is wrong");
 });
@@ -50,7 +65,7 @@ Deno.test("keeps the notes with every permission", async () => {
 });
 `;
 
-function changes(mutants: readonly Mutant[]): (readonly [number, string, string])[] {
+function changes(mutants: readonly Mutant[]): Array<readonly [number, string, string]> {
   return mutants.map(({ line, original, replacement }) => [line, original, replacement]);
 }
 
@@ -68,78 +83,78 @@ async function fixture(test: string): Promise<string> {
 
 Deno.test("lists a mutant per operator, condition, boolean, string and statement, outside types and imports", () => {
   assertEquals(changes(mutantsOf("pick.ts", TYPESCRIPT)), [
-    [4, "!on", "true"],
-    [4, "!on", "false"],
-    [4, "!", ""],
-    [4, "`${a}`", '""'],
-    [5, 'log({ "key": false });', ";"],
-    [5, "false", "true"],
-    [6, "===", "!=="],
-    [6, "!==", "==="],
-    [6, "<=", "<"],
-    [6, ">=", ">"],
-    [6, ">", ">="],
-    [6, "||", "&&"],
-    [6, "??", "&&"],
-    [6, "-", "+"],
-    [6, "+", "-"],
-    [6, "/", "*"],
-    [6, "*", "/"],
-    [7, "a < b && on", "true"],
-    [7, "a < b && on", "false"],
-    [7, "&&", "||"],
-    [7, "<", "<="],
-    [7, '"less"', '""'],
-    [7, '""', '"mutant"'],
+    [GUARD_LINE, "!on", "true"],
+    [GUARD_LINE, "!on", "false"],
+    [GUARD_LINE, "!", ""],
+    [GUARD_LINE, `\`\${a}\``, '""'],
+    [LOG_LINE, 'log({ "key": false });', ";"],
+    [LOG_LINE, "false", "true"],
+    [OPERATORS_LINE, "===", "!=="],
+    [OPERATORS_LINE, "!==", "==="],
+    [OPERATORS_LINE, "<=", "<"],
+    [OPERATORS_LINE, ">=", ">"],
+    [OPERATORS_LINE, ">", ">="],
+    [OPERATORS_LINE, "||", "&&"],
+    [OPERATORS_LINE, "??", "&&"],
+    [OPERATORS_LINE, "-", "+"],
+    [OPERATORS_LINE, "+", "-"],
+    [OPERATORS_LINE, "/", "*"],
+    [OPERATORS_LINE, "*", "/"],
+    [RETURN_LINE, "a < b && on", "true"],
+    [RETURN_LINE, "a < b && on", "false"],
+    [RETURN_LINE, "&&", "||"],
+    [RETURN_LINE, "<", "<="],
+    [RETURN_LINE, '"less"', '""'],
+    [RETURN_LINE, '""', '"mutant"'],
   ]);
 });
 
 Deno.test("lists SQL mutants inside function bodies only, and none inside a string", () => {
   assertEquals(changes(mutantsOf("f.sql", SQL)), [
-    [4, " = ", " <> "],
-    [4, "1", "2"],
-    [4, " and ", " or "],
-    [4, " is not null", " is null"],
-    [4, "'one = 1'", "''"],
-    [5, "not found", "found"],
-    [5, "''", "'mutant'"],
-    [6, " between ", " not between "],
-    [6, "2", "3"],
-    [6, "3", "4"],
-    [6, "'few'", "''"],
-    [7, " <> ", " = "],
-    [7, "1", "2"],
-    [7, " or ", " and "],
-    [7, " < ", " <= "],
-    [7, "2", "3"],
-    [7, " or ", " and "],
-    [7, " <= ", " < "],
-    [7, "3", "4"],
-    [7, " or ", " and "],
-    [7, " > ", " >= "],
-    [7, "4", "5"],
-    [7, " or ", " and "],
-    [7, " >= ", " > "],
-    [7, "5", "6"],
-    [7, " or ", " and "],
-    [7, " is null", " is not null"],
-    [7, " or ", " and "],
-    [7, " not between ", " between "],
-    [7, "6", "7"],
-    [7, "7", "8"],
-    [7, " or ", " and "],
-    [7, " in (", " not in ("],
-    [7, "8", "9"],
-    [7, " or ", " and "],
-    [7, " not in (", " in ("],
-    [7, "9", "10"],
+    [SQL_IF_LINE, " = ", " <> "],
+    [SQL_IF_LINE, "1", "2"],
+    [SQL_IF_LINE, " and ", " or "],
+    [SQL_IF_LINE, " is not null", " is null"],
+    [SQL_IF_LINE, "'one = 1'", "''"],
+    [SQL_FOUND_LINE, "not found", "found"],
+    [SQL_FOUND_LINE, "''", "'mutant'"],
+    [SQL_CASE_LINE, " between ", " not between "],
+    [SQL_CASE_LINE, "2", "3"],
+    [SQL_CASE_LINE, "3", "4"],
+    [SQL_CASE_LINE, "'few'", "''"],
+    [SQL_CHAIN_LINE, " <> ", " = "],
+    [SQL_CHAIN_LINE, "1", "2"],
+    [SQL_CHAIN_LINE, " or ", " and "],
+    [SQL_CHAIN_LINE, " < ", " <= "],
+    [SQL_CHAIN_LINE, "2", "3"],
+    [SQL_CHAIN_LINE, " or ", " and "],
+    [SQL_CHAIN_LINE, " <= ", " < "],
+    [SQL_CHAIN_LINE, "3", "4"],
+    [SQL_CHAIN_LINE, " or ", " and "],
+    [SQL_CHAIN_LINE, " > ", " >= "],
+    [SQL_CHAIN_LINE, "4", "5"],
+    [SQL_CHAIN_LINE, " or ", " and "],
+    [SQL_CHAIN_LINE, " >= ", " > "],
+    [SQL_CHAIN_LINE, "5", "6"],
+    [SQL_CHAIN_LINE, " or ", " and "],
+    [SQL_CHAIN_LINE, " is null", " is not null"],
+    [SQL_CHAIN_LINE, " or ", " and "],
+    [SQL_CHAIN_LINE, " not between ", " between "],
+    [SQL_CHAIN_LINE, "6", "7"],
+    [SQL_CHAIN_LINE, "7", "8"],
+    [SQL_CHAIN_LINE, " or ", " and "],
+    [SQL_CHAIN_LINE, " in (", " not in ("],
+    [SQL_CHAIN_LINE, "8", "9"],
+    [SQL_CHAIN_LINE, " or ", " and "],
+    [SQL_CHAIN_LINE, " not in (", " in ("],
+    [SQL_CHAIN_LINE, "9", "10"],
   ]);
 });
 
 Deno.test("runs the tests that load the file of each mutant in a copy, all tests for SQL, and leaves the tree as it was", async () => {
   const root = await fixture(MATH_TEST);
   const mutants = [...mutantsOf("math.ts", MATH), ...mutantsOf("notes.sql", NOTES)];
-  const results = await runMutants(root, mutants, ["tests/math_test.ts"], 2);
+  const results = await runMutants(root, mutants, ["tests/math_test.ts"], TWO_WORKERS);
   assertEquals(results.map(({ mutant, outcome }) => [mutant.original, outcome]), [
     ["+", "killed"],
     ["+", "invalid"],
@@ -155,7 +170,7 @@ Deno.test("runs the tests that load the file of each mutant in a copy, all tests
 Deno.test("refuses to mutate when the tests fail before any mutation", async () => {
   const root = await fixture(MATH_TEST.replace("!== 5", "!== 6"));
   await assertRejects(
-    async () => await runMutants(root, mutantsOf("math.ts", MATH), ["tests/math_test.ts"], 1),
+    async () => await runMutants(root, mutantsOf("math.ts", MATH), ["tests/math_test.ts"], ONE_WORKER),
     Error,
     "tests/math_test.ts fails before any mutation.",
   );
@@ -174,14 +189,14 @@ Deno.test("scores 100% when no mutant counts", () => {
 });
 
 Deno.test("scores the percentage the summary prints, rounded to 2 decimals", () => {
-  const mutant: Mutant = { file: "math.ts", line: 2, start: 50, end: 51, original: "+", replacement: "-" };
+  const mutant: Mutant = { end: 51, file: "math.ts", line: 2, original: "+", replacement: "-", start: 50 };
   const results: Result[] = [{ mutant, outcome: "killed" }, { mutant, outcome: "killed" }, {
     mutant,
     outcome: "survived",
   }];
-  assertEquals(score(results), 66.67);
+  assertEquals(score(results), TWO_THIRDS_SCORE);
   assertEquals(
-    summary(results).split("\n").at(-1),
+    summary(results).split("\n").at(LAST),
     "Mutation score is 66.67%. The tests killed 2 of 3 mutants that compiled. 0 of 3 mutants did not compile.",
   );
 });
@@ -207,8 +222,8 @@ Deno.test("the command lists each survivor and exits 1 only below the minimum sc
     return { code: output.code, lines: new TextDecoder().decode(output.stdout).trim().split("\n") };
   };
   const survivors = [
-    'math.ts:4 replaces "\\"a\\"" with "\\"\\"", and every test still passes.',
-    'math.ts:4 replaces "\\"b\\"" with "\\"\\"", and every test still passes.',
+    String.raw`math.ts:4 replaces "\"a\"" with "\"\"", and every test still passes.`,
+    String.raw`math.ts:4 replaces "\"b\"" with "\"\"", and every test still passes.`,
     'math.ts:6 replaces "true" with "false", and every test still passes.',
     "Mutation score is 25.00%. The tests killed 1 of 4 mutants that compiled. 1 of 5 mutants did not compile.",
   ];

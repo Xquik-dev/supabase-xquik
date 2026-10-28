@@ -1,9 +1,15 @@
-import { mutantsOf, runMutants, score, summary } from "./mutation.ts";
+import { runMutants, score, summary } from "./mutation.ts";
+import mutantsOf from "./mutants.ts";
+
+const CORES_PER_WORKER = 2;
 
 const [minimum, ...files] = Deno.args;
-const mutants = (await Promise.all(files.map(async (file) => mutantsOf(file, await Deno.readTextFile(file))))).flat();
-const tests = Deno.readDirSync("tests").map(({ name }) => `tests/${name}`).filter((name) => name.endsWith("_test.ts"))
-  .toArray().toSorted();
-const results = await runMutants(Deno.cwd(), mutants, tests, Math.floor(navigator.hardwareConcurrency / 2));
-console.log(summary(results));
-if (!(score(results) >= Number(minimum))) Deno.exitCode = 1;
+const perFile = await Promise.all(files.map(async (file) => mutantsOf(file, await Deno.readTextFile(file))));
+const entries = await Array.fromAsync(Deno.readDir("tests"));
+const tests = entries.map(({ name }) => `tests/${name}`).filter((name) => name.endsWith("_test.ts")).toSorted();
+const workers = Math.floor(navigator.hardwareConcurrency / CORES_PER_WORKER);
+const results = await runMutants(Deno.cwd(), perFile.flat(), tests, workers);
+await Deno.stdout.write(new TextEncoder().encode(`${summary(results)}\n`));
+if (!(score(results) >= Number(minimum))) {
+  Deno.exitCode = 1;
+}

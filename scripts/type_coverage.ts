@@ -1,263 +1,298 @@
+import parseJson from "@shared/json.ts";
 import ts from "typescript";
 import { z } from "zod";
 
-export type Site = { readonly file: string; readonly line: number; readonly column: number; readonly text: string };
-export type Report = {
+interface Site {
+  readonly file: string;
+  readonly line: number;
+  readonly column: number;
+  readonly text: string;
+}
+interface Report {
   readonly checked: number;
   readonly uncovered: readonly Site[];
   readonly statements: number;
   readonly floating: readonly Site[];
-};
+}
 
 const REMOTE_ROOT = "/deno-remote/";
 const DENO_TYPES = "/deno-types/lib.deno.d.ts";
+const DENO_LIB_REFERENCE = /^\/\/\/ <reference lib="deno\.[^"]+" \/>$/gmu;
 const SITE_TEXT = 80;
+const TEXT_START = 0;
+const ONE_BASED = 1;
+const NONE = 0;
+const FULL = 100;
+const PERCENT_DECIMALS = 2;
 const SET_PARENT_NODES = true;
-const LITERALS = new Set([
-  ts.SyntaxKind.StringLiteral,
-  ts.SyntaxKind.NumericLiteral,
-  ts.SyntaxKind.BigIntLiteral,
-  ts.SyntaxKind.NoSubstitutionTemplateLiteral,
-  ts.SyntaxKind.RegularExpressionLiteral,
-  ts.SyntaxKind.TrueKeyword,
-  ts.SyntaxKind.FalseKeyword,
-  ts.SyntaxKind.NullKeyword,
-]);
+const KEYWORD_LITERALS = new Set([ts.SyntaxKind.TrueKeyword, ts.SyntaxKind.FalseKeyword, ts.SyntaxKind.NullKeyword]);
 
 const resolved = z.object({ specifier: z.string() });
-const denoInfo = z.object({
-  modules: z.array(z.object({
-    specifier: z.string(),
-    local: z.string().optional(),
-    dependencies: z.array(z.union([
-      z.object({ specifier: z.string(), type: resolved }),
-      z.object({ specifier: z.string(), code: resolved }),
-    ])).default([]),
-  })),
-  redirects: z.record(z.string(), z.string()),
+const typeDependency = z.object({ specifier: z.string(), type: resolved });
+const codeDependency = z.object({ code: resolved, specifier: z.string() });
+const denoDependency = z.union([typeDependency, codeDependency]);
+const denoModule = z.object({
+  dependencies: z.array(denoDependency).default([]),
+  local: z.string().optional(),
+  specifier: z.string(),
 });
-const denoConfig = z.object({
-  compilerOptions: z.looseObject({ types: z.array(z.string()).default([]) }),
-});
+const denoInfo = z.object({ modules: z.array(denoModule), redirects: z.record(z.string(), z.string()) });
+const typeFiles = z.array(z.string()).default([]);
+const denoConfig = z.object({ compilerOptions: z.looseObject({ types: typeFiles }) });
 
-type Graph = {
-  readonly local: ReadonlyMap<string, string>;
+interface Graph {
+  readonly sources: ReadonlyMap<string, string>;
   readonly dependencies: ReadonlyMap<string, ReadonlyMap<string, string>>;
-};
+}
+
+const verdicts = new WeakMap<ts.Type, boolean>();
 
 async function deno(root: string, args: readonly string[]): Promise<string> {
   const output = await new Deno.Command(Deno.execPath(), { args: [...args], cwd: root, stderr: "inherit" }).output();
-  if (!output.success) throw new Error(`deno ${String(args[0])} failed with exit code ${String(output.code)}.`);
+  if (!output.success) {
+    throw new Error(`deno ${String(args[0])} failed with exit code ${String(output.code)}.`);
+  }
   return new TextDecoder().decode(output.stdout);
+}
+
+function remotePath(specifier: string): string {
+  return `${REMOTE_ROOT}${specifier.replace(/^https:\/\//u, "")}`;
+}
+
+function targetOf(dependency: z.infer<typeof denoDependency>): string {
+  if ("type" in dependency) {
+    return dependency.type.specifier;
+  }
+  return dependency.code.specifier;
 }
 
 async function moduleGraph(root: string, files: readonly string[]): Promise<Graph> {
   const infos = await Promise.all(
-    files.map(async (file) => denoInfo.parse(JSON.parse(await deno(root, ["info", "--json", file])))),
+    files.map(async (file) => denoInfo.parse(parseJson(await deno(root, ["info", "--json", file])))),
   );
   const modules = infos.flatMap((info) => info.modules);
   const redirects = new Map(infos.flatMap((info) => Object.entries(info.redirects)));
   const follow = (specifier: string): string => redirects.get(specifier) ?? specifier;
+  const sources = await Promise.all(modules.map(async ({ specifier, local }): Promise<Array<[string, string]>> => {
+    if (typeof local === "string") {
+      return [[remotePath(specifier), await Deno.readTextFile(local)]];
+    }
+    return [];
+  }));
   return {
-    local: new Map(modules.flatMap(({ specifier, local }) => local === undefined ? [] : [[specifier, local]])),
     dependencies: new Map(modules.map((module) => [
       module.specifier,
-      new Map(module.dependencies.map((dependency) => [
-        dependency.specifier,
-        follow("type" in dependency ? dependency.type.specifier : dependency.code.specifier),
-      ])),
+      new Map(module.dependencies.map((dependency) => [dependency.specifier, follow(targetOf(dependency))])),
     ])),
+    sources: new Map(sources.flat()),
   };
 }
 
-function remotePath(specifier: string): string {
-  return `${REMOTE_ROOT}${specifier.replace(/^https:\/\//, "")}`;
-}
-
 function specifierOf(fileName: string): string {
-  return fileName.startsWith(REMOTE_ROOT)
-    ? `https://${fileName.slice(REMOTE_ROOT.length)}`
-    : new URL(`file://${fileName}`).href;
+  if (fileName.startsWith(REMOTE_ROOT)) {
+    return `https://${fileName.slice(REMOTE_ROOT.length)}`;
+  }
+  return new URL(`file://${fileName}`).href;
 }
 
 function compilerHost(options: ts.CompilerOptions, graph: Graph, denoTypes: string): ts.CompilerHost {
   const host = ts.createCompilerHost(options);
-  const remote = new Map([...graph.local].map(([specifier, local]) => [remotePath(specifier), local]));
-  const virtual = (fileName: string): string | undefined => {
-    if (fileName === DENO_TYPES) return denoTypes;
-    const local = remote.get(fileName);
-    return local === undefined ? undefined : Deno.readTextFileSync(local);
-  };
+  const sources = new Map(graph.sources).set(DENO_TYPES, denoTypes);
   const resolve = (text: string, containingFile: string): ts.ResolvedModuleWithFailedLookupLocations => {
     const target = graph.dependencies.get(specifierOf(containingFile))?.get(text);
     if (target?.startsWith("file:") === true) {
-      return { resolvedModule: { resolvedFileName: new URL(target).pathname, extension: ts.Extension.Ts } };
+      return { resolvedModule: { extension: ts.Extension.Ts, resolvedFileName: new URL(target).pathname } };
     }
     if (target?.startsWith("https:") === true) {
-      return { resolvedModule: { resolvedFileName: remotePath(target), extension: ts.Extension.Ts } };
+      return { resolvedModule: { extension: ts.Extension.Ts, resolvedFileName: remotePath(target) } };
     }
     return ts.resolveModuleName(text, containingFile, options, host);
   };
   return {
     ...host,
-    fileExists: (fileName) => virtual(fileName) !== undefined || host.fileExists(fileName),
-    readFile: (fileName) => virtual(fileName) ?? host.readFile(fileName),
+    fileExists: (fileName) => sources.has(fileName) || host.fileExists(fileName),
     getSourceFile: (fileName, languageVersion) => {
-      const text = virtual(fileName);
-      return text === undefined
-        ? host.getSourceFile(fileName, languageVersion)
-        : ts.createSourceFile(fileName, text, languageVersion, SET_PARENT_NODES, ts.ScriptKind.TS);
+      const text = sources.get(fileName);
+      if (typeof text === "string") {
+        return ts.createSourceFile(fileName, text, languageVersion, SET_PARENT_NODES, ts.ScriptKind.TS);
+      }
+      return host.getSourceFile(fileName, languageVersion);
     },
+    readFile: (fileName) => sources.get(fileName) ?? host.readFile(fileName),
     resolveModuleNameLiterals: (literals, containingFile) =>
       literals.map((literal) => resolve(literal.text, containingFile)),
   };
 }
 
-function isTypeReference(type: ts.Type): type is ts.TypeReference {
-  return "objectFlags" in type && typeof type.objectFlags === "number" &&
-    (type.objectFlags & ts.ObjectFlags.Reference) !== 0;
+function typeArguments(type: ts.Type & Pick<ts.TypeReference, "typeArguments">): readonly ts.Type[] {
+  return type.typeArguments ?? [];
 }
 
-function isErrorType(type: ts.Type): boolean {
-  return "intrinsicName" in type && type.intrinsicName === "error";
+function reachesAny(type: ts.Type, seen: Set<ts.Type>): boolean {
+  if (seen.has(type)) {
+    return false;
+  }
+  seen.add(type);
+  if (type.flags === ts.TypeFlags.Any) {
+    return !("intrinsicName" in type && type.intrinsicName === "error");
+  }
+  return (type.isUnionOrIntersection() && type.types.some((part) => reachesAny(part, seen))) ||
+    [...typeArguments(type), ...(type.aliasTypeArguments ?? [])].some((part) => reachesAny(part, seen));
 }
 
-function anyFinder(checker: ts.TypeChecker): (type: ts.Type) => boolean {
-  const verdicts = new Map<ts.Type, boolean>();
-  const reachesAny = (type: ts.Type, seen: Set<ts.Type>): boolean => {
-    if (seen.has(type)) return false;
-    seen.add(type);
-    if ((type.flags & ts.TypeFlags.Any) !== 0) return !isErrorType(type);
-    const parts = [
-      ...(type.isUnionOrIntersection() ? type.types : []),
-      ...(isTypeReference(type) ? checker.getTypeArguments(type) : []),
-      ...(type.aliasTypeArguments ?? []),
-    ];
-    return parts.some((part) => reachesAny(part, seen));
-  };
-  return (type) => {
-    const known = verdicts.get(type);
-    if (known !== undefined) return known;
-    const verdict = reachesAny(type, new Set());
-    verdicts.set(type, verdict);
-    return verdict;
-  };
+function hasAny(type: ts.Type): boolean {
+  const verdict = verdicts.get(type) ?? reachesAny(type, new Set());
+  verdicts.set(type, verdict);
+  return verdict;
 }
 
 function holdsThenable(checker: ts.TypeChecker, type: ts.Type, node: ts.Node): boolean {
-  return (type.isUnion() ? type.types : [type]).some((part) => {
-    if (isTypeReference(part) && (checker.isArrayType(part) || checker.isTupleType(part))) {
-      return checker.getTypeArguments(part).some((element) => holdsThenable(checker, element, node));
+  if (type.isUnion()) {
+    return type.types.some((part) => holdsThenable(checker, part, node));
+  }
+  if (checker.isArrayType(type) || checker.isTupleType(type)) {
+    return typeArguments(type).some((element) => holdsThenable(checker, element, node));
+  }
+  const then = type.getProperty("then");
+  if (!then) {
+    return false;
+  }
+  return checker.getTypeOfSymbolAtLocation(then, node).getCallSignatures().length > NONE;
+}
+
+function isValue(node: ts.Node): boolean {
+  return !KEYWORD_LITERALS.has(node.kind) && !ts.isLiteralExpression(node) &&
+    (ts.isIdentifier(node) || ts.isExpression(node));
+}
+
+function walked(sources: readonly ts.SourceFile[]): { expressions: ts.ExpressionStatement[]; values: ts.Node[] } {
+  const expressions: ts.ExpressionStatement[] = [];
+  const values: ts.Node[] = [];
+  const visit = (node: ts.Node, typed: boolean): void => {
+    if (ts.isExpressionStatement(node)) {
+      expressions.push(node);
     }
-    const then = part.getProperty("then");
-    return then !== undefined && checker.getTypeOfSymbolAtLocation(then, node).getCallSignatures().length > 0;
-  });
-}
-
-function expressionStatements(file: ts.SourceFile): ts.ExpressionStatement[] {
-  const statements: ts.ExpressionStatement[] = [];
-  const visit = (node: ts.Node): void => {
-    if (ts.isExpressionStatement(node)) statements.push(node);
-    ts.forEachChild(node, visit);
+    if (!typed && isValue(node)) {
+      values.push(node);
+    }
+    ts.forEachChild(node, (child) => {
+      visit(child, typed || ts.isTypeNode(child));
+    });
   };
-  ts.forEachChild(file, visit);
-  return statements;
+  for (const file of sources) {
+    ts.forEachChild(file, (child) => {
+      visit(child, ts.isTypeNode(child));
+    });
+  }
+  return { expressions, values };
 }
 
-function valueNodes(file: ts.SourceFile): ts.Node[] {
-  const nodes: ts.Node[] = [];
-  const visit = (node: ts.Node): void => {
-    if (ts.isTypeNode(node)) return;
-    if (!LITERALS.has(node.kind) && (ts.isIdentifier(node) || ts.isExpression(node))) nodes.push(node);
-    ts.forEachChild(node, visit);
-  };
-  ts.forEachChild(file, visit);
-  return nodes;
-}
-
-function site(file: ts.SourceFile, name: string, node: ts.Node): Site {
+function site(root: string, node: ts.Node): Site {
+  const file = node.getSourceFile();
   const { line, character } = file.getLineAndCharacterOfPosition(node.getStart(file));
-  const text = node.getText(file).replace(/\n[\s\S]*/, "").slice(0, SITE_TEXT);
-  return { file: name, line: line + 1, column: character + 1, text };
+  const text = node.getText(file).replace(/\n[\s\S]*/u, "").slice(TEXT_START, SITE_TEXT);
+  return { column: character + ONE_BASED, file: file.fileName.slice(`${root}/`.length), line: line + ONE_BASED, text };
 }
 
 function diagnosticText(diagnostic: ts.Diagnostic): string {
   const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, " ");
-  if (diagnostic.file === undefined || diagnostic.start === undefined) return message;
+  if (!diagnostic.file || typeof diagnostic.start !== "number") {
+    return message;
+  }
   const { line, character } = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
-  return `${diagnostic.file.fileName}:${String(line + 1)}:${String(character + 1)} ${message}`;
+  return `${diagnostic.file.fileName}:${String(line + ONE_BASED)}:${String(character + ONE_BASED)} ${message}`;
 }
 
-export async function typeCoverage(root: string, files: readonly string[]): Promise<Report> {
-  const config = denoConfig.parse(JSON.parse(await Deno.readTextFile(`${root}/deno.json`)));
+async function readConfig(root: string): Promise<Pick<ts.ParsedCommandLine, "errors" | "fileNames" | "options">> {
+  const config = denoConfig.parse(parseJson(await Deno.readTextFile(`${root}/deno.json`)));
   const { types, ...compilerOptions } = config.compilerOptions;
   const converted = ts.convertCompilerOptionsFromJson(compilerOptions, root);
   const options: ts.CompilerOptions = {
     ...converted.options,
-    target: ts.ScriptTarget.ESNext,
+    allowImportingTsExtensions: true,
     module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler,
-    allowImportingTsExtensions: true,
     noEmit: true,
+    target: ts.ScriptTarget.ESNext,
     types: [],
   };
+  return { errors: converted.errors, fileNames: types, options };
+}
+
+async function checkedProgram(root: string, files: readonly string[]): Promise<[ts.TypeChecker, ts.SourceFile[]]> {
+  const config = await readConfig(root);
   const paths = files.map((file) => `${root}/${file}`);
   const [graph, denoTypes] = await Promise.all([moduleGraph(root, paths), deno(root, ["types"])]);
   const program = ts.createProgram({
-    rootNames: [DENO_TYPES, ...types.map((file) => `${root}/${file}`), ...paths],
-    options,
-    host: compilerHost(options, graph, denoTypes.replaceAll(/^\/\/\/ <reference lib="deno\.[^"]+" \/>$/gm, "")),
+    host: compilerHost(config.options, graph, denoTypes.replaceAll(DENO_LIB_REFERENCE, "")),
+    options: config.options,
+    rootNames: [DENO_TYPES, ...config.fileNames.map((file) => `${root}/${file}`), ...paths],
   });
-  const sources = paths.map((path) => program.getSourceFile(path)).filter((file) => file !== undefined);
+  const sources = paths.map((path) => program.getSourceFile(path)).filter((file) => typeof file === "object");
   const diagnostics = [
-    ...converted.errors,
+    ...config.errors,
     ...program.getOptionsDiagnostics(),
     ...program.getGlobalDiagnostics(),
     ...sources.flatMap((file) => [...program.getSyntacticDiagnostics(file), ...program.getSemanticDiagnostics(file)]),
   ];
-  if (diagnostics.length > 0) {
-    throw new Error(
-      `The type coverage program has errors that deno check does not.\n${diagnostics.map(diagnosticText).join("\n")}`,
-    );
+  if (diagnostics.length > NONE) {
+    const texts = diagnostics.map((diagnostic) => diagnosticText(diagnostic));
+    throw new Error(`The type coverage program has errors that deno check does not.\n${texts.join("\n")}`);
   }
-  const checker = program.getTypeChecker();
-  const hasAny = anyFinder(checker);
-  let checked = 0;
-  let statements = 0;
-  const floating: Site[] = [];
-  const uncovered = sources.flatMap((file) => {
-    const nodes = valueNodes(file);
-    const expressions = expressionStatements(file);
-    checked += nodes.length;
-    statements += expressions.length;
-    const name = file.fileName.slice(root.length + 1);
-    for (const { expression } of expressions) {
-      const value = ts.isVoidExpression(expression) ? expression.expression : expression;
-      if (holdsThenable(checker, checker.getTypeAtLocation(value), value)) floating.push(site(file, name, expression));
-    }
-    return nodes.filter((node) => hasAny(checker.getTypeAtLocation(node))).map((node) => site(file, name, node));
+  return [program.getTypeChecker(), sources];
+}
+
+function unvoided(expression: ts.Expression): ts.Expression {
+  if (ts.isVoidExpression(expression)) {
+    return expression.expression;
+  }
+  return expression;
+}
+
+async function typeCoverage(root: string, files: readonly string[]): Promise<Report> {
+  const [checker, sources] = await checkedProgram(root, files);
+  const { expressions, values } = walked(sources);
+  const floating = expressions.filter(({ expression }) => {
+    const value = unvoided(expression);
+    return holdsThenable(checker, checker.getTypeAtLocation(value), value);
   });
-  return { checked, uncovered, statements, floating };
+  return {
+    checked: values.length,
+    floating: floating.map(({ expression }) => site(root, expression)),
+    statements: expressions.length,
+    uncovered: values.filter((node) => hasAny(checker.getTypeAtLocation(node))).map((node) => site(root, node)),
+  };
 }
 
 function located({ file, line, column, text }: Site): string {
   return `${file}:${String(line)}:${String(column)} ${text}`;
 }
 
-export function summary({ checked, uncovered, statements, floating }: Report): string {
-  const percent = checked === 0 ? 100 : ((checked - uncovered.length) / checked) * 100;
+function percentCovered({ checked, uncovered }: Report): number {
+  if (checked === NONE) {
+    return FULL;
+  }
+  return ((checked - uncovered.length) / checked) * FULL;
+}
+
+function summary(report: Report): string {
+  const { checked, uncovered, statements, floating } = report;
+  const percent = percentCovered(report).toFixed(PERCENT_DECIMALS);
   return [
-    ...uncovered.map(located),
-    `Type coverage is ${percent.toFixed(2)}%. ${String(uncovered.length)} of ${
+    ...uncovered.map((value) => located(value)),
+    `Type coverage is ${percent}%. ${String(uncovered.length)} of ${
       String(checked)
     } values have a type that contains any.`,
-    ...floating.map(located),
+    ...floating.map((value) => located(value)),
     `${String(floating.length)} of ${String(statements)} expression statements leave a promise that no code awaits.`,
   ].join("\n");
 }
 
 if (import.meta.main) {
   const report = await typeCoverage(Deno.cwd(), Deno.args);
-  console.log(summary(report));
-  if (report.uncovered.length > 0 || report.floating.length > 0) Deno.exitCode = 1;
+  await Deno.stdout.write(new TextEncoder().encode(`${summary(report)}\n`));
+  Deno.exitCode = Number(report.uncovered.length > NONE || report.floating.length > NONE);
 }
+
+export { summary, typeCoverage };
+export type { Report, Site };

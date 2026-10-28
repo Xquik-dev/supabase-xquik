@@ -319,9 +319,11 @@ lint_type_aware() {
           | ([$package.specifier] + [$aliases[] | select(.value == $package.specifier) | .key])[] as $prefix
           | $package.exports | to_entries[]
           | { key: ($prefix + (.key | ltrimstr("."))), value: [$package.root + (.value | ltrimstr("./"))] } ] as $paths
+      | [ $config[0].imports | to_entries[] | select(.value | startswith("./"))
+          | { key: (.key + "*"), value: [.value + "*"] } ] as $locals
       | { compilerOptions: ($config[0].compilerOptions + { target: "esnext", module: "preserve",
             moduleResolution: "bundler", lib: ["esnext"], noEmit: true, allowImportingTsExtensions: true,
-            paths: ($paths | from_entries) }),
+            paths: ($paths + $locals | from_entries) }),
           files: (["deno.d.ts"] + $files) }' >tsconfig.json || exit
     OXLINT_TSGOLINT_PATH="${root}/node_modules/.bin/tsgolint" "${root}/node_modules/.bin/oxlint" \
       --type-aware --type-check --format=unix "${files[@]}"
