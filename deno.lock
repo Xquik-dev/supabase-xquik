@@ -6,6 +6,7 @@
     "npm:@supabase/supabase-js@2": "2.118.0",
     "npm:@types/pg@8": "8.23.1",
     "npm:deno@2.9.6": "2.9.6",
+    "npm:fast-check@4": "4.10.2",
     "npm:pg@8": "8.23.1",
     "npm:squawk-cli@2.68.0": "2.68.0",
     "npm:supabase@2.122.0": "2.122.0",
@@ -229,6 +230,12 @@
         "@noble/hashes"
       ]
     },
+    "fast-check@4.10.2": {
+      "integrity": "sha512-iK2f+YrcmoeGqk6fA0ea2bptcu/itMIm4NfEozq6N25+aG6h7s5HZbB/k1aV7b5w5sFLMCbbtRUsTVR+BgC3xw==",
+      "dependencies": [
+        "pure-rand"
+      ]
+    },
     "iceberg-js@0.8.1": {
       "integrity": "sha512-1dhVQZXhcHje7798IVM+xoo/1ZdVfzOMIc8/rgVSijRK38EDqOJoGula9N/8ZI5RD8QTxNQtK/Gozpr+qUqRRA=="
     },
@@ -297,6 +304,9 @@
         "xtend"
       ]
     },
+    "pure-rand@8.4.2": {
+      "integrity": "sha512-vvuOGgcuPJAirlHvuQw1TrOiw7ptaIXXmIbNuiNOY6lNGJJH49PQ1Kj4nd783nPdQhQdicgOjVI2yI/9BD6/Ng=="
+    },
     "split2@4.2.0": {
       "integrity": "sha512-UcjcJOWknrNkF6PLX83qcHM6KHgVKNkV62Y8a5uYDVv9ydGQVwAHMKqHdJje1VTWpljG0WYpCDhrCdAOYH4TWg=="
     },
@@ -356,6 +366,7 @@
       "jsr:@std/assert@1",
       "npm:@supabase/supabase-js@2",
       "npm:@types/pg@8",
+      "npm:fast-check@4",
       "npm:pg@8",
       "npm:typescript@6.0.3",
       "npm:x-twitter-scraper@0.18.0",

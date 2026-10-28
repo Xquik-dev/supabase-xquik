@@ -21,6 +21,7 @@ bin/check-local
 11. `deno audit` and `bun audit` check `deno.lock` and `bun.lock` for known vulnerabilities.
 12. Every test must run and pass, with no ignored test or step. The tests must run every line, branch and function of every tracked TypeScript source file, and the coverage report must measure no other file. The SQL tests apply the migrations with `supabase migration up`. They fail on any Supabase advisor finding at any level, and when `supabase gen types` would change `supabase/functions/_shared/database.types.ts`. They also run every pgTAP test in `supabase/tests` with pgTAP 1.3.4 from PGXN, and fail on a failed, skipped or todo test, or on a test count that differs from the file's plan. `lint/banned-patterns.txt` bans `skip`, `todo`, `todo_start` and `no_plan` calls.
 13. CodeQL runs its security-extended queries over the tracked files.
+14. `scripts/mutate.ts` changes 1 operator, condition, boolean, string or statement at a time in every tracked TypeScript source file and every SQL function body. For each change it runs the tests that load the changed file in a copy of the tree, or every test for SQL. Changes that do not compile do not count. The check fails when the percent of compiling changes that a test catches is below `mutation_minimum` in `bin/check-local`, and it lists each change that no test caught.
 
 Fix what a check finds. Never suppress a finding or narrow a check.
 

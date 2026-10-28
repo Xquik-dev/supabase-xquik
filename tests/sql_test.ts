@@ -192,9 +192,14 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
 
   await step("xquik.call sends to the xquik_base_url Vault secret without its trailing slash", async () => {
     await reply(200, "application/json", "{}");
+    await reply(201, "application/json", "{}");
     await sql`select vault.create_secret('http://localhost:8080/', 'xquik_base_url')`;
     await sql`select xquik.call('getAccount')`;
-    assertEquals((await httpCalls()).map((call) => call["url"]), ["http://localhost:8080/api/v1/account"]);
+    await sql`select xquik.call('createTweet', '{"text": "hi"}')`;
+    assertEquals((await httpCalls()).map((call) => call["url"]), [
+      "http://localhost:8080/api/v1/account",
+      "http://localhost:8080/api/v1/x/tweets",
+    ]);
   });
 
   await step(
@@ -355,11 +360,12 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
     await enqueueAnswered([404, "application/json", '{"error": "user_not_found"}']);
     await enqueueAnswered([204, null, ""]);
     await enqueueAnswered([200, "text/plain", "pong"]);
+    await enqueueAnswered([300, "application/json", '{"moved": true}']);
     const [timedOut] = await sql`select xquik.enqueue('getAccount') as id`;
     await sql`insert into net._http_response (id, error_msg)
       select request_id, 'Timeout of 30000 ms reached' from public.xquik_actions where id = ${timedOut?.["id"]}`;
     await sql`select xquik.enqueue('getAccount')`;
-    assertEquals(await sql`select xquik.collect() as finished`, [{ finished: 5 }]);
+    assertEquals(await sql`select xquik.collect() as finished`, [{ finished: 6 }]);
     assertEquals(
       await sql`select status, http_status::integer as code, response, finished_at is not null as finished
         from public.xquik_actions order by id`,
@@ -368,6 +374,7 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
         { status: "failed", code: 404, response: { error: "user_not_found" }, finished: true },
         { status: "succeeded", code: 204, response: null, finished: true },
         { status: "succeeded", code: 200, response: "pong", finished: true },
+        { status: "failed", code: 300, response: { moved: true }, finished: true },
         { status: "failed", code: null, response: { error: "Timeout of 30000 ms reached" }, finished: true },
         { status: "sent", code: null, response: null, finished: false },
       ],

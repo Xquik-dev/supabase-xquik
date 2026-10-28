@@ -19,3 +19,7 @@
 - Add pgTAP tests in `supabase/tests/database` for the tables, row level
   security, policies, functions, grants and indexes. `bin/check-local` runs
   them, and `supabase test db` runs them on a local stack.
+- Fail the checks when the mutation score of the TypeScript sources and the SQL
+  functions drops below a minimum.
+- Add fast-check property tests for the webhook signature check, the secret
+  list, the `askDocs` answers and the SQL quoting.
