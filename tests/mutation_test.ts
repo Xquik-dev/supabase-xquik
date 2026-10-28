@@ -53,7 +53,7 @@ export function unused(): boolean {
 
 const NOTES = "create function one() returns int language sql as $$ select 1 $$;\n";
 
-const MATH_TEST = `import { add } from "@/math.ts";
+const MATH_TEST = `import { add } from "../math.ts";
 Deno.test("adds", () => {
   if (add(2, 3) !== 5) throw new Error("add is wrong");
 });

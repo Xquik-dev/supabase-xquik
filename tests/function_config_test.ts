@@ -31,10 +31,26 @@ const functions = [...Deno.readDirSync(FUNCTIONS)]
   .filter((entry) => entry.isDirectory && !entry.name.startsWith("_"))
   .map((entry) => entry.name);
 
+function isLocal([, target]: readonly [string, string]): boolean {
+  return target.startsWith(".");
+}
+
+function directory(target: string | undefined, base: string): string {
+  return new URL(target ?? "", `file://${Deno.cwd()}/${base}`).href;
+}
+
 for (const name of functions) {
   Deno.test(`${name} has its own deno.json with the root specifier of each package it imports`, async () => {
     const own = denoConfig.parse(parseJson(await Deno.readTextFile(`${FUNCTIONS}/${name}/deno.json`)));
-    const used = await bareImports(`./${FUNCTIONS}/${name}/index.ts`);
-    assertEquals(own.imports, Object.fromEntries(used.map((specifier) => [specifier, root.imports[specifier]])));
+    const entries = Object.entries(own.imports);
+    const aliases = entries.filter((entry) => isLocal(entry)).map(([alias]) => alias);
+    const packages = Object.fromEntries(entries.filter((entry) => !isLocal(entry)));
+    const imported = await bareImports(`./${FUNCTIONS}/${name}/index.ts`);
+    const used = imported.filter((specifier) => !aliases.some((alias) => specifier.startsWith(alias)));
+    assertEquals(packages, Object.fromEntries(used.map((specifier) => [specifier, root.imports[specifier]])));
+    assertEquals(
+      aliases.map((alias) => directory(own.imports[alias], `${FUNCTIONS}/${name}/`)),
+      aliases.map((alias) => directory(root.imports[alias], "")),
+    );
   });
 }
