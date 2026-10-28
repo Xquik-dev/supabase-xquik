@@ -2,13 +2,13 @@ import { latestMigration, REGISTRY_SUFFIX } from "../scripts/generate.ts";
 import { assertEquals, assertExists } from "@std/assert";
 import { APIResource } from "x-twitter-scraper/core/resource";
 import { z } from "zod";
+import { securityRequirements } from "../scripts/openapi.ts";
 import { handleDelivery } from "../supabase/functions/_shared/webhook.ts";
 import { askDocs, createXquik, getSportsGameView } from "../supabase/functions/_shared/xquik.ts";
 import { memoryStore, post, receiver, sampleEvent, signDelivery, TEST_ALERT } from "./delivery.ts";
 
-const security = z.array(z.record(z.string(), z.unknown()));
 const spec = z.object({
-  security,
+  security: securityRequirements,
   paths: z.record(z.string(), z.record(z.string(), z.unknown())),
   components: z.object({
     schemas: z.object({
@@ -23,7 +23,7 @@ type Operation = { id: string; method: string; template: string; inScope: boolea
 const operations: Operation[] = Object.entries(spec.paths).flatMap(([template, item]) =>
   ["get", "put", "post", "patch", "delete"].flatMap((method) => {
     if (item[method] === undefined) return [];
-    const op = z.object({ operationId: z.string(), security: security.optional() }).parse(item[method]);
+    const op = z.object({ operationId: z.string(), security: securityRequirements.optional() }).parse(item[method]);
     const requirements = op.security ?? spec.security;
     const inScope = requirements.some((requirement) =>
       Object.keys(requirement).length === 0 || "apiKey" in requirement

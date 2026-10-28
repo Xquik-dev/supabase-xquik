@@ -7,14 +7,11 @@ import {
   assertThrows,
 } from "@std/assert";
 import { z } from "zod";
-import { FOREIGN_TABLES_SUFFIX, foreignTables, renderForeignTables } from "../scripts/foreign_tables.ts";
-import { latestMigration, operationRows, REGISTRY_SUFFIX, renderMigration, SPEC_PATH } from "../scripts/generate.ts";
+import { FOREIGN_TABLES_SUFFIX, renderForeignTables } from "../scripts/foreign_tables.ts";
+import { latestMigration, readGeneration, REGISTRY_SUFFIX, renderMigration, SPEC_PATH } from "../scripts/generate.ts";
 import { publicOperations } from "../scripts/openapi.ts";
 
-const root: unknown = JSON.parse(await Deno.readTextFile(SPEC_PATH));
-const operations = publicOperations(root);
-const rows = operationRows(operations);
-const tables = foreignTables(operations);
+const { rows, tables } = await readGeneration();
 
 Deno.test("the latest registry & foreign table migrations match a fresh generation from openapi.json", async () => {
   const fresh = { [REGISTRY_SUFFIX]: renderMigration(rows), [FOREIGN_TABLES_SUFFIX]: renderForeignTables(tables) };

@@ -4,7 +4,7 @@ const METHODS = [["get", "GET"], ["put", "PUT"], ["post", "POST"], ["patch", "PA
 
 export type Method = (typeof METHODS)[number][1];
 
-const securityRequirements = z.array(z.record(z.string(), z.array(z.string())));
+export const securityRequirements = z.array(z.record(z.string(), z.array(z.string())));
 const document = z.object({
   security: securityRequirements,
   paths: z.record(

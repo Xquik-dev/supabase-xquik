@@ -1,6 +1,7 @@
 import { assert, assertArrayIncludes, assertEquals, assertExists } from "@std/assert";
 import pg, { DatabaseError } from "pg";
 import { z } from "zod";
+import { securityRequirements } from "../scripts/openapi.ts";
 import { FOREIGN_TABLES_SUFFIX } from "../scripts/foreign_tables.ts";
 import { latestMigration, REGISTRY_SUFFIX, SPEC_PATH } from "../scripts/generate.ts";
 import "../supabase/functions/_shared/database.types.ts";
@@ -46,12 +47,11 @@ const FUNCTIONS = [
 ];
 const NO_JSON_ANSWER = ["downloadSupportAttachment", "streamEvents"];
 
-const security = z.array(z.record(z.string(), z.unknown()));
 const spec = z.object({
-  security,
+  security: securityRequirements,
   paths: z.record(
     z.string(),
-    z.object({ get: z.object({ operationId: z.string(), security: security.optional() }).optional() }),
+    z.object({ get: z.object({ operationId: z.string(), security: securityRequirements.optional() }).optional() }),
   ),
 }).parse(JSON.parse(await Deno.readTextFile(SPEC_PATH)));
 const publicGets = Object.entries(spec.paths).flatMap(([path, { get }]) =>
