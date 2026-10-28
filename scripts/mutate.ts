@@ -5,7 +5,8 @@ const CORES_PER_WORKER = 2;
 
 const [minimum, ...files] = Deno.args;
 const perFile = await Promise.all(files.map(async (file) => mutantsOf(file, await Deno.readTextFile(file))));
-const tests = [...Deno.readDirSync("tests")].map(({ name }) => `tests/${name}`).filter((name) => name.endsWith("_test.ts")).toSorted();
+const testFiles = [...Deno.readDirSync("tests")].map(({ name }) => `tests/${name}`);
+const tests = testFiles.filter((name) => name.endsWith("_test.ts")).toSorted();
 const workers = Math.floor(navigator.hardwareConcurrency / CORES_PER_WORKER);
 const results = await runMutants(Deno.cwd(), perFile.flat(), tests, workers);
 await Deno.stdout.write(new TextEncoder().encode(`${summary(results)}\n`));
