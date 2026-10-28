@@ -37,6 +37,7 @@ Checked on 2026-10-15. See each number with its date & source on [xquik.com/trus
 
 - A typed Xquik client for Edge Functions in `supabase/functions/_shared/xquik.ts`.
 - `xquik.call`, `xquik.rows`, `xquik.enqueue` & `xquik.schedule` for SQL, cron jobs & triggers.
+- Foreign tables in the `xquik` schema for public reads. Query them with `select`.
 - The `xquik-webhook` Edge Function. It checks each delivery's signature & stores each event once.
 - Row level security on every table, with no policies. Only the service role reads them.
 
@@ -83,6 +84,26 @@ from xquik.rows('searchTweets', '{"q": "from:NASA"}') as tweet;
 Path parameters such as `id` go into the URL. Other parameters go into the query string for GET & DELETE. They go into the JSON body for other methods. Run `select * from xquik.operations` to list every operation id.
 
 Only the service role runs these functions. Call them from SQL, cron jobs, triggers or a server with the service role key.
+
+## Query X data as foreign tables
+
+Each public read that answers with JSON is a foreign table in the `xquik` schema. Its name is the operation id in snake case.
+
+```sql
+select attrs ->> 'name', attrs ->> 'followers' from xquik.get_user where id = 'NASA';
+
+select attrs ->> 'text' from xquik.search_tweets where q = 'from:NASA' limit 20;
+```
+
+- Path & query parameters are columns, & an `=` filter sends them.
+- Quote mixed-case names, as in `where "pageSize" = 50`.
+- `attrs` holds each row as JSON.
+- A `limit` stops paging early.
+- A query reads at most 10 pages, & `alter server xquik_server options (set max_pages '50')` raises that.
+- The tables read your API key from the `xquik_api_key` Vault secret.
+- Query them as `postgres`, the role the SQL editor, cron jobs & direct database connections use.
+- `xquik.export_draw` & `xquik.export_extraction` return JSON rows.
+- Event streams & support attachment downloads have no table. Use the `xquik-webhook` receiver or an Edge Function for them.
 
 ## Schedule calls
 
@@ -146,7 +167,7 @@ XQUIK_WEBHOOK_SECRET=your_webhook_secret deno task test:stack
 deno task generate
 ```
 
-`deno task test` proves that every operation in `openapi.json` has a tested path. It also proves that every event type gets a receiver result. `deno task test:stack` runs against `supabase start`. `deno task generate` rebuilds the operation list from `openapi.json`. `bin/check-local` installs the pinned Deno with Bun. Then it runs the checks & tests.
+`deno task test` proves that every operation in `openapi.json` has a tested path. It also proves that every event type gets a receiver result. The foreign table test checks each table against `openapi.json`. `deno task test:stack` runs against `supabase start`. `deno task generate` rebuilds the operation list & the foreign tables from `openapi.json`. `bin/check-local` installs the pinned Deno with Bun. Then it runs the checks & tests.
 
 ## Documentation
 
