@@ -173,12 +173,12 @@ Deno.test("the Supabase stack", async (t) => {
         };
         assertEquals(await finish("NASA"), {
           status: "succeeded",
-          http_status: 200,
+          http_status: "200",
           response: { tweets: [{ id: "1" }, { id: "2" }], ok: true },
         });
         assertEquals(await finish("missing"), {
           status: "failed",
-          http_status: 404,
+          http_status: "404",
           response: { error: "user_not_found", message: "No user has that handle." },
         });
         assertEquals(seen.map(({ method, path }) => `${method} ${path}`), [

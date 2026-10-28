@@ -1,6 +1,7 @@
 {
   "private": true,
   "devDependencies": {
-    "deno": "2.9.6"
+    "deno": "2.9.6",
+    "squawk-cli": "2.68.0"
   }
 }
