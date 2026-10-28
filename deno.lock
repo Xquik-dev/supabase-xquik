@@ -7,6 +7,7 @@
     "npm:@types/pg@8": "8.23.1",
     "npm:deno@2.9.6": "2.9.6",
     "npm:pg@8": "8.23.1",
+    "npm:squawk-cli@2.68.0": "2.68.0",
     "npm:x-twitter-scraper@0.18.0": "0.18.0",
     "npm:zod@4": "4.6.7"
   },
@@ -49,6 +50,41 @@
     },
     "@deno/win32-x64@2.9.6": {
       "integrity": "sha512-qRGnmVz/Ea6UWPht/S3xFRK17UZ/ls38DSVfgGB17fpASLxPkksqzWUI/BzL9YYoOknYzfc94mySGyInZu/JXw==",
+      "os": ["win32"],
+      "cpu": ["x64"]
+    },
+    "@squawk-cli/darwin-arm64@2.68.0": {
+      "integrity": "sha512-MDe5/uRqkoBvU4MVzPwRJZHoRxZ78vNhyYeoy/0mZKhZz64xH6zQozoJBM7W9pspHGjBQ2u+tEVf30gurBGS9A==",
+      "os": ["darwin"],
+      "cpu": ["arm64"]
+    },
+    "@squawk-cli/darwin-x64@2.68.0": {
+      "integrity": "sha512-NTuclGY2a/9H6jfGbxot401sdQH3su4MbQeBNrXY/EeH3CUKQtOXSyI6vMvR4wQut6lc/uU3TpofK2CVM8YpEA==",
+      "os": ["darwin"],
+      "cpu": ["x64"]
+    },
+    "@squawk-cli/linux-arm64-musl@2.68.0": {
+      "integrity": "sha512-JbvhsK9WxLWN0eDUO8skclUKhn9qIcYPmAakiFrmnAKqvhCzwzBvVnQX1E5Y+BduaFJpap36eJq/4gEzVSHJ/g==",
+      "os": ["linux"],
+      "cpu": ["arm64"]
+    },
+    "@squawk-cli/linux-arm64@2.68.0": {
+      "integrity": "sha512-//HDEdhO4QSFY8VPvPfYBEcSgXaa4wyycyLSvdvJ9uC03REGy+0UvYZyGZy1qOwnoIoVr8aWukZ9b68Lsz0mtg==",
+      "os": ["linux"],
+      "cpu": ["arm64"]
+    },
+    "@squawk-cli/linux-x64-musl@2.68.0": {
+      "integrity": "sha512-kBwXlCFhIRNaJaLN+gtI9pi4zS6p1QgVvD2Gf5yyQ3Z3tv5dzCZ0FcMETcxwE2CW+2Wa1lnevy0OUWktc0+Btw==",
+      "os": ["linux"],
+      "cpu": ["x64"]
+    },
+    "@squawk-cli/linux-x64@2.68.0": {
+      "integrity": "sha512-by8mRyKmVCrJ42fV3/wcAD8KdsupMHWIT/9ubmwxKHrl9TDetDgOtOo4xQKfND5n2RH5yBBsjgW1ailOgSl3QQ==",
+      "os": ["linux"],
+      "cpu": ["x64"]
+    },
+    "@squawk-cli/win32-x64@2.68.0": {
+      "integrity": "sha512-++jd0uZ1UatYzdBz4wao8Ip525xjDTbvx+pJK+A21yeKfXZQTaB0RJXsIae7cofSFOgRAXvwVzlzK8PWzlpjsg==",
       "os": ["win32"],
       "cpu": ["x64"]
     },
@@ -192,6 +228,19 @@
     "split2@4.2.0": {
       "integrity": "sha512-UcjcJOWknrNkF6PLX83qcHM6KHgVKNkV62Y8a5uYDVv9ydGQVwAHMKqHdJje1VTWpljG0WYpCDhrCdAOYH4TWg=="
     },
+    "squawk-cli@2.68.0": {
+      "integrity": "sha512-hH+pvEPxPutJ1zDDP1DOY5sJv7wAngPAEW33Flta18yB1+/nLifbRTYpMvHHXtNneJIPZHHo941sc/mPzP8wQw==",
+      "optionalDependencies": [
+        "@squawk-cli/darwin-arm64",
+        "@squawk-cli/darwin-x64",
+        "@squawk-cli/linux-arm64",
+        "@squawk-cli/linux-arm64-musl",
+        "@squawk-cli/linux-x64",
+        "@squawk-cli/linux-x64-musl",
+        "@squawk-cli/win32-x64"
+      ],
+      "bin": true
+    },
     "tslib@2.8.1": {
       "integrity": "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w=="
     },
@@ -212,13 +261,15 @@
     "dependencies": [
       "jsr:@std/assert@1",
       "npm:@supabase/supabase-js@2",
+      "npm:@types/pg@8",
       "npm:pg@8",
       "npm:x-twitter-scraper@0.18.0",
       "npm:zod@4"
     ],
     "packageJson": {
       "dependencies": [
-        "npm:deno@2.9.6"
+        "npm:deno@2.9.6",
+        "npm:squawk-cli@2.68.0"
       ]
     }
   }

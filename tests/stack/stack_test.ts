@@ -1,5 +1,4 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-// @ts-types="npm:@types/pg@8"
 import pg, { DatabaseError } from "pg";
 import { z } from "zod";
 import { post, randomNonce, sampleEvent, sign, TEST_ALERT } from "../delivery.ts";
