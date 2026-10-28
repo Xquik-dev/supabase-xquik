@@ -98,6 +98,15 @@ Deno.test("stops at a type that refers to itself", async () => {
   assertEquals(uncovered, []);
 });
 
+Deno.test("does not count as any a type that failed to resolve in a file it does not check", async () => {
+  const root = await project({
+    "lib.ts": "export const broken: Missing = 1;\n",
+    "use.ts": 'import { broken } from "./lib.ts";\nexport const copy = broken;\n',
+  });
+  const { uncovered } = await typeCoverage(root, ["use.ts"]);
+  assertEquals(uncovered, []);
+});
+
 Deno.test("resolves local, jsr and npm imports the way deno check does", async () => {
   const report = await typeCoverage(REPO, ["tests/webhook_test.ts", "supabase/functions/_shared/webhook.ts"]);
   assertEquals([report.uncovered, report.floating], [[], []]);

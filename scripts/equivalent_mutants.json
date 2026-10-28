@@ -35,20 +35,6 @@
     "reason": "The key never leaves signedByAny, so no code can try to export it."
   },
   {
-    "file": "supabase/functions/_shared/webhook.ts",
-    "context": "headers.get(\"x-xquik-timestamp\") ?? \"\"",
-    "original": "\"\"",
-    "replacement": "\"mutant\"",
-    "reason": "A missing header and the replacement text both fail the digits pattern, so both answer stale."
-  },
-  {
-    "file": "supabase/functions/_shared/webhook.ts",
-    "context": "headers.get(\"x-xquik-signature\") ?? \"\"",
-    "original": "\"\"",
-    "replacement": "\"mutant\"",
-    "reason": "A missing header and the replacement text both fail the sha256 pattern, so both answer signature."
-  },
-  {
     "file": "supabase/migrations/20261028000000_xquik.sql",
     "context": "coalesce(content, '')",
     "original": "''",

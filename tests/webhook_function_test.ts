@@ -1,5 +1,5 @@
-import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { answersInOrder, post, randomNonce, sampleEvent, SECRET, signDelivery, TEST_ALERT } from "./delivery.ts";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import parseJson from "@shared/json.ts";
 
 const FUNCTION = new URL("../supabase/functions/xquik-webhook/index.ts", import.meta.url);

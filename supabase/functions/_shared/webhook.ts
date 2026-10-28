@@ -50,6 +50,7 @@ interface DeliveryDeps {
 }
 
 interface SignedParts {
+  readonly mac: string;
   readonly nonce: string;
   readonly rawBody: Uint8Array;
   readonly timestamp: string;
@@ -106,12 +107,13 @@ function signedMessage({ nonce, rawBody, timestamp }: SignedParts): Uint8Array<A
   return message;
 }
 
-async function isSigned(headers: Headers, secrets: readonly string[], parts: SignedParts): Promise<boolean> {
-  const header = headers.get("x-xquik-signature") ?? "";
-  if (parts.nonce === "" || !SIGNATURE.test(header)) {
-    return false;
+function signedParts(headers: Headers, rawBody: Uint8Array, timestamp: string): SignedParts | null {
+  const nonce = headers.get("x-xquik-nonce");
+  const signature = headers.get("x-xquik-signature");
+  if (nonce === null || nonce === "" || signature === null || !SIGNATURE.test(signature)) {
+    return null;
   }
-  return await signedByAny(secrets, header.slice(SIGNATURE_PREFIX.length), signedMessage(parts));
+  return { mac: signature.slice(SIGNATURE_PREFIX.length), nonce, rawBody, timestamp };
 }
 
 async function verifyDelivery(
@@ -119,19 +121,19 @@ async function verifyDelivery(
   secrets: readonly string[],
   nowMs: number,
 ): Promise<Verdict> {
-  const timestamp = headers.get("x-xquik-timestamp") ?? "";
-  if (isStale(timestamp, nowMs)) {
+  const timestamp = headers.get("x-xquik-timestamp");
+  if (timestamp === null || isStale(timestamp, nowMs)) {
     return { ok: false, reason: "stale" };
   }
-  const nonce = headers.get("x-xquik-nonce");
-  if (nonce === null || !(await isSigned(headers, secrets, { nonce, rawBody, timestamp }))) {
+  const parts = signedParts(headers, rawBody, timestamp);
+  if (!parts || !(await signedByAny(secrets, parts.mac, signedMessage(parts)))) {
     return { ok: false, reason: "signature" };
   }
   const parsed = deliveryBody.safeParse(decodeJson(rawBody));
   if (!parsed.success) {
     return { ok: false, reason: "malformed" };
   }
-  return { delivery: parsed.data, nonce, ok: true };
+  return { delivery: parsed.data, nonce: parts.nonce, ok: true };
 }
 
 const ANSWERS = {

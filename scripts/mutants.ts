@@ -156,7 +156,10 @@ function typescriptMutants(file: string, text: string): Mutant[] {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, SET_PARENT_NODES);
   const found: Mutant[] = [];
   const visit = (node: ts.Node): void => {
-    if (ts.isTypeNode(node) || ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+    if (
+      ts.isTypeNode(node) || ts.isInterfaceDeclaration(node) || ts.isImportDeclaration(node) ||
+      ts.isExportDeclaration(node)
+    ) {
       return;
     }
     for (const [start, end, replacement] of [...nodeEdits(node, source), ...conditionEdits(node, source)]) {

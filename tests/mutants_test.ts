@@ -21,6 +21,9 @@ export function pick(a: number, b: number, on: boolean): string {
   const all = [a === b, a !== b, a <= b, a >= b, a > b, a || b, a ?? b, a + b - a * b / a];
   return a < b && on ? "less" : "";
 }
+export interface Named {
+  readonly "key": string;
+}
 `;
 
 const SQL = `create table t (a int check (a = 1));
@@ -43,7 +46,7 @@ function changes(mutants: readonly Mutant[]): Array<readonly [number, string, st
   return mutants.map(({ line, original, replacement }) => [line, original, replacement]);
 }
 
-Deno.test("lists a mutant per operator, condition, boolean, string and statement, outside types and imports", () => {
+Deno.test("lists a mutant per operator, condition, boolean, string and statement, outside types, interfaces and imports", () => {
   assertEquals(changes(mutantsOf("pick.ts", TYPESCRIPT)), [
     [GUARD_LINE, "!on", "true"],
     [GUARD_LINE, "!on", "false"],

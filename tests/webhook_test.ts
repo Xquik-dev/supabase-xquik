@@ -1,5 +1,3 @@
-import type { DeliveryDeps, DeliveryStore } from "@shared/webhook.ts";
-import { handleDelivery, parseSecrets, verifyDelivery } from "@shared/webhook.ts";
 import {
   answersInOrder,
   memoryStore,
@@ -13,6 +11,8 @@ import {
   signDelivery,
   TEST_ALERT,
 } from "./delivery.ts";
+import type { DeliveryDeps, DeliveryStore } from "@shared/webhook.ts";
+import { handleDelivery, parseSecrets, verifyDelivery } from "@shared/webhook.ts";
 import { assertEquals } from "@std/assert";
 import parseJson from "@shared/json.ts";
 
