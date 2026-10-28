@@ -91,7 +91,9 @@ Deno.test("the gateway script serves its JSON config and stops on SIGTERM", asyn
   try {
     let answer: Response | undefined;
     for (let attempt = 0; attempt < 100 && answer === undefined; attempt++) {
-      answer = await fetch(`http://127.0.0.1:${String(port)}/rest/v1/xquik_actions`, { headers: { apikey: KEYS.publishable } })
+      answer = await fetch(`http://127.0.0.1:${String(port)}/rest/v1/xquik_actions`, {
+        headers: { apikey: KEYS.publishable },
+      })
         .catch(async () => {
           await new Promise((resolve) => setTimeout(resolve, 100));
           return undefined;
