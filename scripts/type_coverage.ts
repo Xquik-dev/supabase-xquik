@@ -194,7 +194,6 @@ export async function typeCoverage(root: string, files: readonly string[]): Prom
     target: ts.ScriptTarget.ESNext,
     module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler,
-    noEmit: true,
     types: [],
   };
   const paths = files.map((file) => `${root}/${file}`);

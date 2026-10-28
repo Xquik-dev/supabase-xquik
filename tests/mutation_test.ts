@@ -187,11 +187,20 @@ Deno.test("lists SQL mutants inside function bodies only, and none inside a stri
   ]);
 });
 
-Deno.test("each mutant names the offsets of the text it replaces", () => {
-  for (const [file, text] of [["pick.ts", TYPESCRIPT], ["f.sql", SQL]] as const) {
-    const mutants = mutantsOf(file, text);
-    assertEquals(mutants.map(({ start, end }) => text.slice(start, end)), mutants.map(({ original }) => original));
-  }
+Deno.test("each mutant replaces exactly the text it names", () => {
+  const sources = {
+    "a.ts": "export const a = 1 + 2;\n",
+    "f.sql": "create function f() returns bool as $$ select 1 = 2 $$;\n",
+  };
+  const mutated = Object.entries(sources).flatMap(([file, text]) =>
+    mutantsOf(file, text).map(({ start, end, replacement }) => text.slice(0, start) + replacement + text.slice(end))
+  );
+  assertEquals(mutated, [
+    "export const a = 1 - 2;\n",
+    "create function f() returns bool as $$ select 2 = 2 $$;\n",
+    "create function f() returns bool as $$ select 1 <> 2 $$;\n",
+    "create function f() returns bool as $$ select 1 = 3 $$;\n",
+  ]);
 });
 
 Deno.test("plan sets aside the mutant each equivalent entry names and lists each entry that names 0 or several", () => {
@@ -295,16 +304,19 @@ Deno.test("scores 100% when no mutant counts", () => {
   );
 });
 
-Deno.test("scores the percentage the summary prints, rounded to 2 decimals", () => {
+Deno.test("scores the percentage the summary prints, rounded down to 2 decimals so 1 survivor stays below 100%", () => {
   const mutant: Mutant = { file: "math.ts", line: 2, start: 50, end: 51, original: "+", replacement: "-" };
-  const results: Result[] = [{ mutant, outcome: "killed" }, { mutant, outcome: "killed" }, {
-    mutant,
-    outcome: "survived",
-  }];
-  assertEquals({ twoOfThree: score(results), half: score(results.slice(1)) }, { twoOfThree: 66.67, half: 50 });
+  const killed: Result = { mutant, outcome: "killed" };
+  const results: Result[] = [killed, killed, { mutant, outcome: "survived" }];
+  const many = { killed: 19_999 };
+  const nearlyAll = [...Array.from({ length: many.killed }, () => killed), ...results.slice(-1)];
+  assertEquals(
+    { twoOfThree: score(results), half: score(results.slice(1)), nearlyAll: score(nearlyAll) },
+    { twoOfThree: 66.66, half: 50, nearlyAll: 99.99 },
+  );
   assertEquals(
     summary(results, 1).split("\n").at(-1),
-    "Mutation score is 66.67%. The tests killed 2 of 3 mutants that compiled. 1 of 4 mutants are equivalent and 0 did not compile.",
+    "Mutation score is 66.66%. The tests killed 2 of 3 mutants that compiled. 1 of 4 mutants are equivalent and 0 did not compile.",
   );
 });
 
@@ -313,7 +325,7 @@ Deno.test("the command sets aside equivalent mutants, lists each survivor and ex
     "math_test.ts": MATH_TEST,
     "text_test.ts": TEXT_TEST,
     "workers_test.ts": WORKERS_TEST,
-    "fixture.txt": "A file that is not a test module.\n",
+    "helper.ts": 'throw new Error("deno test ran a module that is not a test");\n',
   });
   const unused = { file: "math.ts", context: "return true", original: "true", replacement: "false", reason: "Unused." };
   const run = async (minimum: string, entries: readonly Equivalent[]): Promise<{ code: number; lines: string[] }> => {

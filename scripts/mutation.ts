@@ -282,7 +282,7 @@ export async function runMutants(
 export function score(results: readonly Result[]): number {
   const killed = results.filter(({ outcome }) => outcome === "killed").length;
   const survived = results.filter(({ outcome }) => outcome === "survived").length;
-  return killed + survived === 0 ? 100 : Math.round((killed / (killed + survived)) * 10_000) / 100;
+  return killed + survived === 0 ? 100 : Math.floor((killed / (killed + survived)) * 10_000) / 100;
 }
 
 export function summary(results: readonly Result[], equivalent: number): string {
