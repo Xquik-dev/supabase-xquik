@@ -157,23 +157,34 @@ Deno.test("the Supabase stack", async (t) => {
 
     await t.step("xquik.enqueue sends an action with pg_net and xquik.collect finishes it", async () => {
       await fakeXquik(sql, async (seen) => {
-        const [{ id } = {}] = await sql`select xquik.enqueue('getUser', '{"id": "NASA"}') as id`;
-        const [sent] = await sql`select status, request_id from public.xquik_actions where id = ${String(id)}`;
-        assertEquals(sent?.["status"], "sent");
-        let finished: Record<string, unknown> | undefined;
-        for (let attempt = 0; attempt < 50 && finished === undefined; attempt++) {
-          await sql`select xquik.collect()`;
-          [finished] = await sql`select status, http_status, response from public.xquik_actions
-            where id = ${String(id)} and status <> 'sent'`;
-          if (finished === undefined) await new Promise((resolve) => setTimeout(resolve, 200));
-        }
-        assertEquals(finished, {
+        const finish = async (handle: string) => {
+          const [{ id } = {}] = await sql`select xquik.enqueue('getUser', ${JSON.stringify({ id: handle })}) as id`;
+          const [sent] = await sql`select status, request_id from public.xquik_actions where id = ${String(id)}`;
+          assertEquals(sent?.["status"], "sent");
+          let finished: Record<string, unknown> | undefined;
+          for (let attempt = 0; attempt < 50 && finished === undefined; attempt++) {
+            await sql`select xquik.collect()`;
+            [finished] = await sql`select status, http_status, response from public.xquik_actions
+              where id = ${String(id)} and status <> 'sent'`;
+            if (finished === undefined) await new Promise((resolve) => setTimeout(resolve, 200));
+          }
+          await sql`delete from public.xquik_actions where id = ${String(id)}`;
+          return finished;
+        };
+        assertEquals(await finish("NASA"), {
           status: "succeeded",
           http_status: 200,
           response: { tweets: [{ id: "1" }, { id: "2" }], ok: true },
         });
-        assertEquals(seen.map(({ method, path }) => `${method} ${path}`), ["GET /api/v1/x/users/NASA"]);
-        await sql`delete from public.xquik_actions where id = ${String(id)}`;
+        assertEquals(await finish("missing"), {
+          status: "failed",
+          http_status: 404,
+          response: { error: "user_not_found", message: "No user has that handle." },
+        });
+        assertEquals(seen.map(({ method, path }) => `${method} ${path}`), [
+          "GET /api/v1/x/users/NASA",
+          "GET /api/v1/x/users/missing",
+        ]);
       });
       const patch = await sql`select xquik.enqueue('updateAccount', '{"locale": "en"}')`.then(
         () => "",

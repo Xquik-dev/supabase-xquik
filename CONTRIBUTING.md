@@ -27,7 +27,3 @@ a fake Xquik server on this machine. If your Docker runs rootless, set
 
 Replace `openapi.json` with the latest `https://xquik.com/openapi.json`. Then
 run `deno task generate` and commit the regenerated migration.
-
-Check endpoint names, parameters and examples against the Xquik OpenAPI schema
-or public documentation. Never add runtime secrets to examples, tests,
-documentation or issues.

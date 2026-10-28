@@ -1,10 +1,10 @@
 import { assertEquals } from "@std/assert";
-import { MIGRATION_PATH, operationRows, renderMigration, SPEC_PATH } from "../scripts/generate.ts";
+import { latestRegistryMigration, operationRows, renderMigration, SPEC_PATH } from "../scripts/generate.ts";
 
 const rows = operationRows(JSON.parse(await Deno.readTextFile(SPEC_PATH)));
 
-Deno.test("the committed registry migration matches a fresh generation from openapi.json", async () => {
-  assertEquals(await Deno.readTextFile(MIGRATION_PATH), renderMigration(rows));
+Deno.test("the latest registry migration matches a fresh generation from openapi.json", async () => {
+  assertEquals(await Deno.readTextFile(await latestRegistryMigration()), renderMigration(rows));
 });
 
 Deno.test("list_field names the required array that every success shape shares", () => {
