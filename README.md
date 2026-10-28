@@ -37,8 +37,9 @@ Checked on 2026-10-28. See each number with its date & source on [xquik.com/trus
 
 - A typed Xquik client for Edge Functions in `supabase/functions/_shared/xquik.ts`.
 - `xquik.call`, `xquik.rows`, `xquik.enqueue` & `xquik.schedule` for SQL, cron jobs & triggers.
+- Foreign tables in the `xquik` schema for public reads.
 - The `xquik-webhook` Edge Function. It checks each delivery's signature & stores each event once.
-- Each operation and client role has a `using (false)` or `with check (false)` policy, which the advisors require.
+- Each regular table has a `using (false)` or `with check (false)` policy for each operation and client role, which the advisors require.
 
 ## Start everything with 1 command
 
@@ -85,6 +86,28 @@ from xquik.rows('searchTweets', '{"q": "from:NASA"}') as tweet;
 Path parameters such as `id` go into the URL. Other parameters go into the query string for GET & DELETE. They go into the JSON body for other methods. Run `select * from xquik.operations` to list every operation id.
 
 Only the service role runs these functions. Call them from SQL, cron jobs, triggers or a server with the service role key.
+
+## Query X data as foreign tables
+
+Each public read that answers with JSON is a foreign table in the `xquik` schema. Its name is the operation id in snake case.
+
+```sql
+select attrs ->> 'name', attrs ->> 'followers' from xquik.get_user where id = 'NASA';
+
+select attrs ->> 'text' from xquik.search_tweets where q = 'from:NASA' limit 20;
+```
+
+- Path & query parameters are columns, & an `=` filter sends them.
+- Quote mixed-case names, as in `where "pageSize" = 50`.
+- `attrs` holds each row as JSON.
+- A SQL `limit` clause stops paging early.
+- A query reads at most 10 pages unless you raise the server's `max_pages`, as in `alter server xquik_server options (set max_pages '50')`. The server keeps its options when the tables change.
+- The tables read your API key from the `xquik_api_key` Vault secret.
+- Query them as `postgres`, the role the SQL editor, cron jobs & direct database connections use.
+- `xquik.export_draw` & `xquik.export_extraction` return JSON rows.
+- Event streams & support attachment downloads have no table. Use the `xquik-webhook` receiver or an Edge Function for them.
+- When `openapi.json` changes, the next foreign tables migration rebuilds only the tables whose columns or options changed & drops the tables of removed operations. It also drops any other foreign table on `xquik_server` in the `xquik` schema.
+- A view on a table that the migration rebuilds or drops stops the migration with Postgres's dependency error. Drop the view, run the migration & create the view again. Views on the other tables stay.
 
 ## Schedule calls
 
@@ -149,7 +172,7 @@ deno task generate
 deno task types
 ```
 
-`deno task test` proves that every operation in `openapi.json` has a tested path. It also proves that every event type gets a receiver result. `deno task test:stack` runs against `supabase start`. `deno task generate` rebuilds the operation list from `openapi.json`. `deno task types` regenerates `supabase/functions/_shared/database.types.ts` from `supabase start`. `bin/check-local` installs the pinned Deno with Bun. Then it runs the checks and tests.
+`deno task test` proves that every operation in `openapi.json` has a tested path. It also proves that every event type gets a receiver result. The SQL tests check each foreign table against `openapi.json`. `deno task test:stack` runs against `supabase start`. `deno task generate` rebuilds the operation list and the foreign tables from `openapi.json`. `deno task types` regenerates `supabase/functions/_shared/database.types.ts` from `supabase start`. `bin/check-local` installs the pinned Deno with Bun. Then it runs the checks and tests.
 
 ## Documentation
 

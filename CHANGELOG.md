@@ -13,3 +13,5 @@
 - Type the webhook client with `supabase gen types`, and give `xquik-webhook`
   its own `deno.json`.
 - Fail the checks on any Supabase advisor finding.
+- Add foreign tables in the `xquik` schema for public reads, through the
+  Supabase Wrappers OpenAPI FDW.
