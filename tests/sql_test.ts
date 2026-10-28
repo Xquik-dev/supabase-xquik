@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertArrayIncludes, assertEquals } from "@std/assert";
 import pg, { DatabaseError } from "pg";
 import { latestRegistryMigration, operationRows, SPEC_PATH } from "../scripts/generate.ts";
 
@@ -392,6 +392,11 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
     },
   );
 
+  const plannedIndexes = async (statement: string): Promise<string[]> => {
+    const plan = JSON.stringify(await query(client, `explain (format json) ${statement}`));
+    return [...plan.matchAll(/"Index Name":"([^"]+)"/g)].map(([, name]) => String(name));
+  };
+
   await step("anon and authenticated hold no privilege on any table or sequence in public or xquik", async () => {
     assertEquals(
       await sql`select c.oid::regclass::text as relation, a.grantee::regrole::text as role, a.privilege_type as privilege
@@ -447,6 +452,20 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
       FUNCTIONS.map((name) => ({ name, definer: name !== "response_body", config: ['search_path=""'] })),
     );
   });
+
+  await step(
+    "the registry migration looks up the actions of each stale operation through xquik_actions_operation_id",
+    async () => {
+      await sql`insert into public.xquik_actions (operation_id, status, request_id, finished_at)
+      select o.operation_id, 'succeeded', n, now() from xquik.operations o, generate_series(1, 100) n`;
+      await sql`insert into xquik.operations (operation_id, method, path, kind) values ('staleUnused', 'GET', '/', 'read')`;
+      await sql`analyze public.xquik_actions`;
+      const registry = await Deno.readTextFile(latestRegistryMigration());
+      assertArrayIncludes(await plannedIndexes(registry), ["xquik_actions_operation_id"]);
+      await query(client, registry);
+      assertEquals(await sql`select operation_id from xquik.operations where operation_id = 'staleUnused'`, []);
+    },
+  );
 
   await step(
     "rerunning the registry migration restores changed operations and drops stale ones no action uses",

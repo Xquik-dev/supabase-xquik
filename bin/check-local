@@ -208,8 +208,15 @@ run_codeql() {
   echo "CodeQL read every tracked TypeScript file and found no results."
 }
 
+# The Supabase CLI applies a migration with create index concurrently outside a transaction, and the rest inside one.
 lint_sql() {
-  git ls-files -z -- '*.sql' | xargs -0 -r node_modules/.bin/squawk --assume-in-transaction
+  local listing file inside=() outside=()
+  listing="$(git ls-files -- '*.sql')" || return
+  while IFS= read -r file; do
+    if grep -qiE '^\s*create\s+(unique\s+)?index\s+concurrently\s' "${file}"; then outside+=("${file}"); else inside+=("${file}"); fi
+  done <<<"${listing}"
+  node_modules/.bin/squawk --assume-in-transaction "${inside[@]}" &&
+    { ((${#outside[@]} == 0)) || node_modules/.bin/squawk "${outside[@]}"; }
 }
 
 run_check "bans" "Suppression and exclusion ban" \
