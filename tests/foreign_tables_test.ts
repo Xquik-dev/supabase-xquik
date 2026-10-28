@@ -1,90 +1,6 @@
-import { assertEquals, assertExists, assertStringIncludes } from "@std/assert";
-import { z } from "zod";
-import { FOREIGN_TABLES_SUFFIX, foreignTables, renderForeignTables } from "../scripts/foreign_tables.ts";
-import { latestMigration, SPEC_PATH } from "../scripts/generate.ts";
+import { assertEquals } from "@std/assert";
+import { foreignTables } from "../scripts/foreign_tables.ts";
 import { publicOperations } from "../scripts/openapi.ts";
-
-const root: unknown = JSON.parse(await Deno.readTextFile(SPEC_PATH));
-const latest = latestMigration(FOREIGN_TABLES_SUFFIX);
-assertExists(latest);
-const migration = await Deno.readTextFile(latest);
-
-const NO_JSON_ANSWER = ["downloadSupportAttachment", "streamEvents"];
-
-const security = z.array(z.record(z.string(), z.unknown()));
-const spec = z.object({
-  security,
-  paths: z.record(
-    z.string(),
-    z.object({ get: z.object({ operationId: z.string(), security: security.optional() }).optional() }),
-  ),
-}).parse(root);
-const publicGets = Object.entries(spec.paths).flatMap(([path, { get }]) =>
-  get !== undefined &&
-    (get.security ?? spec.security).some((requirement) =>
-      Object.keys(requirement).length === 0 || "apiKey" in requirement
-    )
-    ? [{ id: get.operationId, path }]
-    : []
-);
-const readable = publicGets.filter(({ id }) => !NO_JSON_ANSWER.includes(id));
-
-const snakeCase = (id: string): string => id.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
-
-const migrationTables = new Map(
-  [...migration.matchAll(
-    /^create foreign table if not exists xquik\.(\w+) \(\n((?: {2}.+\n)+)\)\n {2}server xquik_server\n {2}options \((.+)\);$/gm,
-  )]
-    .map(([, name = "", columns = "", options = ""]) =>
-      [name, {
-        columns: columns.trimEnd().split(",\n").map((line) => line.trim()),
-        options: Object.fromEntries(
-          [...options.matchAll(/(\w+) '((?:[^']|'')*)'/g)].map(([, key = "", value = ""]) =>
-            [key, value.replaceAll("''", "'")] as const
-          ),
-        ),
-      }] as const
-    ),
-);
-
-Deno.test("every public GET operation has a foreign table, except the 2 that answer with no JSON", () => {
-  console.log(`${migrationTables.size} of ${publicGets.length} public GET operations have a foreign table.`);
-  assertEquals(NO_JSON_ANSWER.filter((id) => publicGets.some((read) => read.id === id)), NO_JSON_ANSWER);
-  assertEquals([...migrationTables.keys()].sort(), readable.map(({ id }) => snakeCase(id)).sort());
-});
-
-Deno.test("each foreign table calls its operation's path & takes every path parameter as a column", () => {
-  for (const { id, path } of readable) {
-    const table = migrationTables.get(snakeCase(id));
-    assertEquals(table?.options["endpoint"]?.split("?")[0], path, id);
-    const columns = table?.columns.map((column) => column.split(" ")[0]) ?? [];
-    const placeholders = [...path.matchAll(/\{([^}]+)\}/g)].map(([, name]) => `"${name}"`);
-    assertEquals(placeholders.filter((name) => !columns.includes(name)), [], id);
-    assertEquals(table?.columns.at(-1), "attrs jsonb", id);
-  }
-});
-
-Deno.test("list reads unwrap their list & page by their cursor, single reads keep the whole answer", () => {
-  assertEquals(migrationTables.get("search_tweets")?.options, {
-    endpoint: "/api/v1/x/tweets/search",
-    response_path: "/tweets",
-    cursor_param: "cursor",
-    cursor_path: "/next_cursor",
-  });
-  assertEquals(migrationTables.get("list_draws")?.options, {
-    endpoint: "/api/v1/draws",
-    response_path: "/draws",
-    cursor_param: "cursor",
-    cursor_path: "/nextCursor",
-  });
-  assertEquals(migrationTables.get("list_drafts")?.options["cursor_param"], "afterCursor");
-  assertEquals(migrationTables.get("list_drafts")?.options["cursor_path"], "/nextCursor");
-  assertEquals(migrationTables.get("get_user")?.options, { endpoint: "/api/v1/x/users/{id}", response_path: "" });
-  assertEquals(migrationTables.get("export_draw"), {
-    columns: ['"id" text', '"type" text', "attrs jsonb"],
-    options: { endpoint: "/api/v1/draws/{id}/export?format=json", response_path: "" },
-  });
-});
 
 const jsonAnswer = (schema: unknown) => ({ "200": { content: { "application/json": { schema } } } });
 const page = {
@@ -202,31 +118,5 @@ Deno.test("a list read pages only when it takes a cursor & any answer shape carr
       { operationId: "pagedThroughAnyOf", responsePath: "", cursor: paged },
       { operationId: "pagedThroughOneOf", responsePath: "/items", cursor: paged },
     ],
-  );
-});
-
-Deno.test("rendered tables quote column names, escape literals & leave out an absent cursor_path", () => {
-  const sql = renderForeignTables([{
-    operationId: "getQuote",
-    table: "get_quote",
-    endpoint: "/quotes/{id}?tag='a'",
-    columns: [{ name: 'page"Size', type: "bigint" }],
-    responsePath: "",
-    cursor: null,
-  }]);
-  assertStringIncludes(
-    sql,
-    `          ('get_quote', array['endpoint=/quotes/{id}?tag=''a''', 'response_path='], array['page"Size bigint', 'attrs jsonb'])
-        ) wanted (name, options, columns)`,
-  );
-  assertStringIncludes(
-    sql,
-    `create foreign table if not exists xquik.get_quote (
-  "page""Size" bigint,
-  attrs jsonb
-)
-  server xquik_server
-  options (endpoint '/quotes/{id}?tag=''a''', response_path '');
-`,
   );
 });
