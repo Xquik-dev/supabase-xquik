@@ -526,6 +526,21 @@ Deno.test("the SQL functions and triggers on a throwaway Postgres 18 cluster", a
       try {
         await applyMigrations(client, url);
         await testFunctions(t, client);
+        await t.step("the Supabase advisors report nothing at any level", async () => {
+          await query(client, "select pg_stat_force_next_flush()");
+          await run(SUPABASE, [
+            "db",
+            "advisors",
+            "--db-url",
+            url,
+            "--type",
+            "all",
+            "--level",
+            "info",
+            "--fail-on",
+            "info",
+          ]);
+        });
       } finally {
         await client.end();
       }
