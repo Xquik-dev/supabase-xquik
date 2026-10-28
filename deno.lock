@@ -367,6 +367,14 @@
         "npm:squawk-cli@2.68.0",
         "npm:supabase@2.122.0"
       ]
+    },
+    "members": {
+      "supabase/functions/xquik-webhook": {
+        "dependencies": [
+          "npm:@supabase/supabase-js@2",
+          "npm:zod@4"
+        ]
+      }
     }
   }
 }

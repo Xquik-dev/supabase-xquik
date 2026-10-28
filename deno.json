@@ -1,5 +1,6 @@
 {
   "nodeModulesDir": "auto",
+  "workspace": ["./supabase/functions/xquik-webhook"],
   "tasks": {
     "check": "deno fmt --check && deno lint && deno check && deno task type-coverage",
     "test": "deno test --allow-read --allow-write --allow-run --allow-env --allow-net tests/*_test.ts",
