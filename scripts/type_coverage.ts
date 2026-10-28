@@ -144,9 +144,11 @@ function anyFinder(checker: ts.TypeChecker): (type: ts.Type) => boolean {
   };
 }
 
-function isThenable(checker: ts.TypeChecker, node: ts.Node): boolean {
-  const type = checker.getTypeAtLocation(node);
+function holdsThenable(checker: ts.TypeChecker, type: ts.Type, node: ts.Node): boolean {
   return (type.isUnion() ? type.types : [type]).some((part) => {
+    if (isTypeReference(part) && (checker.isArrayType(part) || checker.isTupleType(part))) {
+      return checker.getTypeArguments(part).some((element) => holdsThenable(checker, element, node));
+    }
     const then = part.getProperty("then");
     return then !== undefined && checker.getTypeOfSymbolAtLocation(then, node).getCallSignatures().length > 0;
   });
@@ -230,7 +232,8 @@ export async function typeCoverage(root: string, files: readonly string[]): Prom
     statements += expressions.length;
     const name = file.fileName.slice(root.length + 1);
     for (const { expression } of expressions) {
-      if (isThenable(checker, expression)) floating.push(site(file, name, expression));
+      const value = ts.isVoidExpression(expression) ? expression.expression : expression;
+      if (holdsThenable(checker, checker.getTypeAtLocation(value), value)) floating.push(site(file, name, expression));
     }
     return nodes.filter((node) => hasAny(checker.getTypeAtLocation(node))).map((node) => site(file, name, node));
   });

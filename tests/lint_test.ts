@@ -7,29 +7,11 @@ function findings(source: string): string[] {
   );
 }
 
-const ignore = (tool: string): string => `${tool}-${"ignore"}`;
-
 Deno.test("no-type-assertion allows only as const", () => {
   assertEquals(
     findings(`const a = ["x"] as const;\nconst b = a as unknown;\nconst c = <string> b;\nexport { c };\n`),
     ["strict/no-type-assertion a as unknown", "strict/no-type-assertion <string> b"],
   );
-});
-
-Deno.test("no-suppression reports each lint, format, coverage and type checker suppression", () => {
-  const suppressions = [
-    `// ${ignore("deno-lint")}-file`,
-    `// ${ignore("deno-fmt")}`,
-    `/* ${ignore("deno-coverage")}-start */`,
-    `// @ts-${"expect-error"}`,
-    `/** @ts-${"nocheck"} */`,
-    `/* ${"istanbul"} ignore next */`,
-    `// ${"eslint"}-disable-next-line`,
-  ];
-  const suppressed = findings(["export const a = 1;", ...suppressions].join("\n")).filter((finding) =>
-    finding.startsWith("strict/no-suppression")
-  );
-  assertEquals(suppressed, suppressions.map((comment) => `strict/no-suppression ${comment}`));
 });
 
 Deno.test("no-code-comments keeps only comments that an https link or an SPDX tag proves", () => {

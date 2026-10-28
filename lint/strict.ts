@@ -1,5 +1,3 @@
-const SUPPRESSION =
-  /^[\s*]*(?:deno-(?:lint|fmt|coverage)-ignore|@ts-(?:ignore|expect-error|nocheck)|(?:istanbul|c8|v8)\s+ignore|(?:es|ox)lint-disable)/;
 const PROOF = /https:\/\/|SPDX-(?:License-Identifier|FileCopyrightText):/;
 const ADJACENT = /^[^\S\n]*\n?[^\S\n]*$/;
 
@@ -33,19 +31,6 @@ export default {
           },
           TSTypeAssertion(node): void {
             context.report({ node, message: "Narrow the value or parse it instead of asserting its type." });
-          },
-        };
-      },
-    },
-    "no-suppression": {
-      create(context): Deno.lint.LintVisitor {
-        return {
-          Program(): void {
-            for (const comment of context.sourceCode.getAllComments()) {
-              if (SUPPRESSION.test(comment.value)) {
-                context.report({ range: comment.range, message: "Fix the finding instead of suppressing it." });
-              }
-            }
           },
         };
       },

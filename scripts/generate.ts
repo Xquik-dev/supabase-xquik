@@ -141,16 +141,10 @@ set method = excluded.method,
 if (import.meta.main) {
   const rows = operationRows(JSON.parse(await Deno.readTextFile(SPEC_PATH)));
   const sql = renderMigration(rows);
-  const latest = (() => {
-    try {
-      return latestRegistryMigration();
-    } catch {
-      return "";
-    }
-  })();
-  const current = latest === "" ? "" : await Deno.readTextFile(latest);
+  const latest = migrationFiles().findLast((path) => path.endsWith(REGISTRY_SUFFIX));
+  const unchanged = latest !== undefined && await Deno.readTextFile(latest) === sql;
   const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
-  const file = current === sql ? latest : `${MIGRATIONS}/${stamp}${REGISTRY_SUFFIX}`;
-  if (file !== latest) await Deno.writeTextFile(file, sql);
-  console.log(JSON.stringify({ operations: rows.length, file, changed: file !== latest }));
+  const file = unchanged ? latest : `${MIGRATIONS}/${stamp}${REGISTRY_SUFFIX}`;
+  if (!unchanged) await Deno.writeTextFile(file, sql);
+  console.log(JSON.stringify({ operations: rows.length, file, changed: !unchanged }));
 }
