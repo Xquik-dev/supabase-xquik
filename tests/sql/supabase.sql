@@ -25,3 +25,8 @@ language sql as $$
   insert into vault.secrets (secret, name, description) values (new_secret, new_name, new_description)
   returning id;
 $$;
+
+grant usage on schema public to anon, authenticated, service_role;
+alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
+alter default privileges in schema public grant all on functions to anon, authenticated, service_role;

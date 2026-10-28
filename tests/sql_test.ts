@@ -8,6 +8,25 @@ type Reply = readonly [status: number, type: string | null, content: string | nu
 const SUPABASE = "node_modules/.bin/supabase";
 const XQUIK = "https://xquik.com";
 const KEY = { "x-api-key": "xq_test_key" };
+const CLIENT_ROLES = ["anon", "authenticated"];
+const TABLES = [
+  {
+    name: "xquik.operations",
+    column: "path",
+    row: "(operation_id, method, path, kind) values ('probe', 'GET', '/', 'read')",
+  },
+  {
+    name: "public.xquik_actions",
+    column: "params",
+    row: "(operation_id, status, request_id, finished_at) values ('getAccount', 'failed', 1, now())",
+  },
+  {
+    name: "public.xquik_events",
+    column: "payload",
+    row: "(stream_event_id, event_type, occurred_at, payload) values ('1', 'tweet.new', now(), '{}')",
+  },
+  { name: "public.xquik_webhook_nonces", column: "seen_at", row: "(nonce) values ('n')" },
+];
 const FUNCTIONS = [
   "api_key",
   "build_request",
@@ -372,6 +391,54 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
       ]);
     },
   );
+
+  await step("anon and authenticated hold no privilege on any table or sequence in public or xquik", async () => {
+    assertEquals(
+      await sql`select c.oid::regclass::text as relation, a.grantee::regrole::text as role, a.privilege_type as privilege
+        from pg_class c, aclexplode(c.relacl) a
+        where c.relnamespace in ('public'::regnamespace, 'xquik'::regnamespace)
+          and a.grantee in ('anon'::regrole, 'authenticated'::regrole)`,
+      [],
+    );
+  });
+
+  await step("row level security denies anon and authenticated every operation even after a grant", async () => {
+    const outcomes: Record<string, unknown>[] = [];
+    for (const table of TABLES) {
+      await query(client, `insert into ${table.name} ${table.row} on conflict do nothing`);
+      for (const role of CLIENT_ROLES) {
+        await query(client, `grant usage on schema xquik to ${role}`);
+        await query(client, `grant select, insert, update, delete on ${table.name} to ${role}`);
+        await query(client, `set local role ${role}`);
+        const count = async (statement: string): Promise<unknown> =>
+          (await query(client, `with hit as (${statement} returning 1) select count(*)::integer as n from hit`))[0]
+            ?.["n"];
+        const [read] = await query(client, `select count(*)::integer as n from ${table.name}`);
+        outcomes.push({
+          role,
+          table: table.name,
+          read: read?.["n"],
+          changed: await count(`update ${table.name} set ${table.column} = ${table.column}`),
+          removed: await count(`delete from ${table.name}`),
+          added: (await failure(() => query(client, `insert into ${table.name} ${table.row}`))).message,
+        });
+        await sql`reset role`;
+      }
+    }
+    assertEquals(
+      outcomes,
+      TABLES.flatMap((table) =>
+        CLIENT_ROLES.map((role) => ({
+          role,
+          table: table.name,
+          read: 0,
+          changed: 0,
+          removed: 0,
+          added: `new row violates row-level security policy for table "${table.name.split(".")[1]}"`,
+        }))
+      ),
+    );
+  });
 
   await step(
     "rerunning the registry migration restores changed operations and drops stale ones no action uses",
