@@ -17,9 +17,9 @@ bin/check-local
 7. `deno lint` runs every rule that applies, plus the `lint/strict.ts` plugin. The plugin bans type assertions other than `as const`, suppression comments & comments without an https link.
 8. `deno check` checks the types with the strict compiler options in `deno.json`.
 9. `scripts/type_coverage.ts` fails when the type of any value contains `any`, or when a statement leaves a promise that no code awaits.
-10. squawk lints every SQL file.
+10. squawk lints every SQL file. It assumes a transaction, except in a migration with `create index concurrently`, which the Supabase CLI runs outside one.
 11. `deno audit` & `bun audit` check `deno.lock` & `bun.lock` for known vulnerabilities.
-12. The tests must pass & run every line, branch & function of every tracked source file.
+12. The tests must pass & run every line, branch & function of every tracked source file. The SQL tests apply the migrations with `supabase migration up`. They fail on any Supabase advisor finding at any level, & when `supabase gen types` would change `supabase/functions/_shared/database.types.ts`.
 13. CodeQL runs its security-extended queries over the tracked files.
 
 Fix what a check finds. Never suppress a finding or narrow a check.

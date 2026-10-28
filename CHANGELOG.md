@@ -7,3 +7,10 @@
 - Add the `xquik-webhook` Edge Function that checks signatures and stores each
   event once.
 - Add a typed Xquik client and `askDocs` for Edge Functions.
+- Deny `anon` and `authenticated` each operation on every table with its own
+  policy, and revoke their default grants.
+- Index the operation of each action, and run `xquik.response_body` as its
+  caller.
+- Type the webhook client with `supabase gen types`, and give `xquik-webhook`
+  its own `deno.json`.
+- Fail the checks on any Supabase advisor finding.

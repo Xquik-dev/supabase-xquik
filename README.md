@@ -38,7 +38,7 @@ Checked on 2026-10-28. See each number with its date & source on [xquik.com/trus
 - A typed Xquik client for Edge Functions in `supabase/functions/_shared/xquik.ts`.
 - `xquik.call`, `xquik.rows`, `xquik.enqueue` & `xquik.schedule` for SQL, cron jobs & triggers.
 - The `xquik-webhook` Edge Function. It checks each delivery's signature & stores each event once.
-- Row level security on every table, with no policies. Only the service role reads them.
+- Row level security on every table. A policy per operation & client role denies `anon` & `authenticated`, & neither role holds a grant. Only the service role reads the tables.
 
 ## Start everything with 1 command
 
@@ -68,6 +68,8 @@ Deno.serve(async () => {
 ```
 
 The client types every method & parameter. `askDocs` searches the Xquik docs. `getSportsGameView` reads game rosters, player props & posts.
+
+Give each function its own `deno.json`, as `supabase/functions/xquik-webhook/deno.json` does. A function that imports `_shared/xquik.ts` maps `x-twitter-scraper` & `zod` there with the specifiers in the root `deno.json`.
 
 ## Read X data with SQL
 
@@ -144,9 +146,10 @@ deno task check
 deno task test
 XQUIK_WEBHOOK_SECRET=your_webhook_secret deno task test:stack
 deno task generate
+deno task types
 ```
 
-`deno task test` proves that every operation in `openapi.json` has a tested path. It also proves that every event type gets a receiver result. `deno task test:stack` runs against `supabase start`. `deno task generate` rebuilds the operation list from `openapi.json`. `bin/check-local` installs the pinned Deno with Bun. Then it runs the checks & tests.
+`deno task test` proves that every operation in `openapi.json` has a tested path. It also proves that every event type gets a receiver result. `deno task test:stack` runs against `supabase start`. `deno task generate` rebuilds the operation list from `openapi.json`. `deno task types` regenerates `supabase/functions/_shared/database.types.ts` from `supabase start`. `bin/check-local` installs the pinned Deno with Bun. Then it runs the checks & tests.
 
 ## Documentation
 
