@@ -9,6 +9,7 @@ const LISTS = ["results", "content", "structuredData"];
 const key = fc.stringMatching(/^[a-z][a-zA-Z_]{0,11}$/).filter((name) => !LISTS.includes(name));
 const scalar = fc.oneof(fc.string({ unit: "grapheme" }), fc.integer(), fc.boolean(), fc.constant(null));
 const fields = fc.dictionary(key, scalar);
+const quotable = fc.oneof(fc.string({ unit: "binary" }), fc.string({ unit: fc.constantFrom(..."'\"\\ a") }));
 const input: fc.Arbitrary<AskDocsInput> = fc.record({
   query: fc.oneof(fc.string({ unit: "grapheme" }), fc.string({ unit: fc.constantFrom(..." &=+%#?/a") })),
   site: fc.constantFrom("docs.xquik.com", "xquik.com"),
@@ -17,8 +18,8 @@ const input: fc.Arbitrary<AskDocsInput> = fc.record({
 }, { requiredKeys: ["query"] });
 
 function answering(status: number, body: unknown, seen: URL[] = []): typeof fetch {
-  return (url) => {
-    seen.push(new URL(String(url)));
+  return (url, init) => {
+    seen.push(new URL(new Request(url, init).url));
     return Promise.resolve(Response.json(body, { status }));
   };
 }
@@ -87,14 +88,14 @@ Deno.test("askDocs rejects every answer without its _meta object", async () => {
 
 Deno.test("literal quotes every string so a SQL reader gets the same string back", () => {
   fc.assert(
-    fc.property(fc.string({ unit: "binary" }), (text) => assertEquals(unquoted(literal(text), "'"), text)),
+    fc.property(quotable, (text) => assertEquals(unquoted(literal(text), "'"), text)),
     { seed: SEED },
   );
 });
 
 Deno.test("identifier quotes every name so a SQL reader gets the same name back", () => {
   fc.assert(
-    fc.property(fc.string({ unit: "binary" }), (name) => assertEquals(unquoted(identifier(name), '"'), name)),
+    fc.property(quotable, (name) => assertEquals(unquoted(identifier(name), '"'), name)),
     { seed: SEED },
   );
 });
