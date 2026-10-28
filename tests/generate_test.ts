@@ -65,13 +65,13 @@ Deno.test("deno task generate writes a migration once and reuses it while openap
   assertEquals(await generate(), { ...first, changed: false });
 });
 
-Deno.test("deno task generate stops when it cannot read the migrations, so it writes no duplicate", async () => {
-  const root = await Deno.makeTempDir();
+Deno.test("deno task generate stops when it cannot read the migrations, so it writes no duplicate", () => {
+  const root = Deno.makeTempDirSync();
   const latest = latestRegistryMigration();
-  await Deno.mkdir(`${root}/supabase/migrations`, { recursive: true });
-  await Deno.copyFile(SPEC_PATH, `${root}/${SPEC_PATH}`);
-  await Deno.copyFile(latest, `${root}/${latest}`);
-  const output = await new Deno.Command(Deno.execPath(), {
+  Deno.mkdirSync(`${root}/supabase/migrations`, { recursive: true });
+  Deno.copyFileSync(SPEC_PATH, `${root}/${SPEC_PATH}`);
+  Deno.copyFileSync(latest, `${root}/${latest}`);
+  const output = new Deno.Command(Deno.execPath(), {
     args: [
       "run",
       "--config",
@@ -81,11 +81,11 @@ Deno.test("deno task generate stops when it cannot read the migrations, so it wr
       new URL("../scripts/generate.ts", import.meta.url).pathname,
     ],
     cwd: root,
-  }).output();
+  }).outputSync();
   assertEquals(output.code, 1);
   assertStringIncludes(new TextDecoder().decode(output.stderr), 'Requires read access to "supabase/migrations"');
-  const names = await Array.fromAsync(Deno.readDir(`${root}/supabase/migrations`), (entry) => entry.name);
-  assertEquals(names.map((name) => `supabase/migrations/${name}`), [latest]);
+  const names = Deno.readDirSync(`${root}/supabase/migrations`).map((entry) => `supabase/migrations/${entry.name}`);
+  assertEquals(names.toArray(), [latest]);
 });
 
 Deno.test("latestRegistryMigration names the directory that has no registry migration", () => {
