@@ -1,12 +1,39 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertExists } from "@std/assert";
 import pg, { DatabaseError } from "pg";
-import { latestRegistryMigration, migrationFiles } from "../scripts/generate.ts";
+import { z } from "zod";
+import { FOREIGN_TABLES_SUFFIX } from "../scripts/foreign_tables.ts";
+import { latestMigration, migrationFiles, REGISTRY_SUFFIX, SPEC_PATH } from "../scripts/generate.ts";
 
 type Row = Record<string, unknown>;
 type Reply = readonly [status: number, type: string | null, content: string | null];
 
 const XQUIK = "https://xquik.com";
 const KEY = { "x-api-key": "xq_test_key" };
+const NO_JSON_ANSWER = ["downloadSupportAttachment", "streamEvents"];
+
+const security = z.array(z.record(z.string(), z.unknown()));
+const spec = z.object({
+  security,
+  paths: z.record(
+    z.string(),
+    z.object({ get: z.object({ operationId: z.string(), security: security.optional() }).optional() }),
+  ),
+}).parse(JSON.parse(await Deno.readTextFile(SPEC_PATH)));
+const publicGets = Object.entries(spec.paths).flatMap(([path, { get }]) =>
+  get !== undefined &&
+    (get.security ?? spec.security).some((requirement) =>
+      Object.keys(requirement).length === 0 || "apiKey" in requirement
+    )
+    ? [{ table: get.operationId.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`), id: get.operationId, path }]
+    : []
+);
+const readable = publicGets.filter(({ id }) => !NO_JSON_ANSWER.includes(id));
+
+const catalogTables = z.array(z.object({
+  name: z.string(),
+  options: z.record(z.string(), z.string()),
+  columns: z.array(z.string()),
+}));
 
 async function run(command: string, args: string[]): Promise<void> {
   const { success, stdout, stderr } = await new Deno.Command(command, { args }).output();
@@ -37,6 +64,12 @@ async function startCluster(dir: string): Promise<void> {
 
 async function query(client: pg.Client, text: string, values: unknown[] = []): Promise<Row[]> {
   return (await client.query<Row, unknown[]>(text, values)).rows;
+}
+
+async function latestSql(suffix: string): Promise<string> {
+  const file = latestMigration(suffix);
+  assertExists(file, `no *${suffix} migration`);
+  return await Deno.readTextFile(file);
 }
 
 async function applyMigrations(client: pg.Client): Promise<void> {
@@ -367,7 +400,7 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
       values ('staleUnused', 'GET', '/unused', 'read'), ('staleUsed', 'GET', '/used', 'read')`;
       await sql`insert into public.xquik_actions (operation_id, status, request_id, finished_at)
       values ('staleUsed', 'failed', 1, now())`;
-      await query(client, await Deno.readTextFile(latestRegistryMigration()));
+      await query(client, await latestSql(REGISTRY_SUFFIX));
       assertEquals(
         await sql`select operation_id as operation, method, path, kind, list_field as list
         from xquik.operations where operation_id in ('getUser', 'staleUnused', 'staleUsed') order by operation_id`,
@@ -378,6 +411,101 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
       );
     },
   );
+
+  const foreignTablesMigration = await latestSql(FOREIGN_TABLES_SUFFIX);
+  const foreignTables = async (): Promise<z.infer<typeof catalogTables>> =>
+    catalogTables.parse(
+      await sql`select c.relname as name,
+          (select jsonb_object_agg(option_name, option_value) from pg_options_to_table(t.ftoptions)) as options,
+          array(select format('%s %s', a.attname, format_type(a.atttypid, a.atttypmod)) from pg_attribute a
+            where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped order by a.attnum) as columns
+        from pg_foreign_table t join pg_class c on c.oid = t.ftrelid
+        where c.relnamespace = 'xquik'::regnamespace order by c.relname`,
+    );
+  const oids = (): Promise<Row[]> =>
+    sql`select relname as name, oid from pg_class
+      where relnamespace = 'xquik'::regnamespace and relkind = 'f' order by relname`;
+
+  await step(
+    "every public GET operation that answers with JSON has a foreign table on its path with its path parameters",
+    async () => {
+      const tables = new Map((await foreignTables()).map((table) => [table.name, table]));
+      console.log(`${tables.size} of ${publicGets.length} public GET operations have a foreign table.`);
+      assertEquals(NO_JSON_ANSWER.filter((id) => publicGets.some((read) => read.id === id)), NO_JSON_ANSWER);
+      assertEquals([...tables.keys()].sort(), readable.map(({ table }) => table).sort());
+      for (const { table: name, path } of readable) {
+        const table = tables.get(name);
+        assertEquals(table?.options["endpoint"]?.split("?")[0], path, name);
+        const columns = table?.columns.map((column) => column.split(" ")[0]) ?? [];
+        const placeholders = [...path.matchAll(/\{([^}]+)\}/g)].map(([, placeholder]) => placeholder);
+        assertEquals(placeholders.filter((placeholder) => !columns.includes(placeholder)), [], name);
+        assertEquals(table?.columns.at(-1), "attrs jsonb", name);
+      }
+    },
+  );
+
+  await step("list reads unwrap their list and page by their cursor, single reads keep the whole answer", async () => {
+    const tables = new Map((await foreignTables()).map(({ name, options, columns }) => [name, { options, columns }]));
+    assertEquals(tables.get("search_tweets")?.options, {
+      endpoint: "/api/v1/x/tweets/search",
+      response_path: "/tweets",
+      cursor_param: "cursor",
+      cursor_path: "/next_cursor",
+    });
+    assertEquals(tables.get("list_draws")?.options, {
+      endpoint: "/api/v1/draws",
+      response_path: "/draws",
+      cursor_param: "cursor",
+      cursor_path: "/nextCursor",
+    });
+    assertEquals(tables.get("list_drafts")?.options["cursor_param"], "afterCursor");
+    assertEquals(tables.get("list_drafts")?.options["cursor_path"], "/nextCursor");
+    assertEquals(tables.get("get_user")?.options, { endpoint: "/api/v1/x/users/{id}", response_path: "" });
+    assertEquals(tables.get("export_draw"), {
+      columns: ["id text", "type text", "attrs jsonb"],
+      options: { endpoint: "/api/v1/draws/{id}/export?format=json", response_path: "" },
+    });
+  });
+
+  await step(
+    "rerunning the foreign tables migration rebuilds only changed tables, drops stale ones and keeps the rest",
+    async () => {
+      const fresh = await foreignTables();
+      const freshOids = new Map((await oids()).map(({ name, oid }) => [name, oid]));
+      await sql`create view public.nasa_profile as select attrs from xquik.get_user where id = 'NASA'`;
+      await sql`alter server xquik_server options (set max_pages '50')`;
+      await sql`alter foreign table xquik.search_tweets options (set endpoint '/old')`;
+      await sql`alter foreign table xquik.list_draws add column extra text`;
+      await sql`create foreign table xquik.stale_read (attrs jsonb) server xquik_server options (endpoint '/stale')`;
+      await query(client, foreignTablesMigration);
+      assertEquals(await foreignTables(), fresh);
+      assertEquals(
+        (await oids()).filter(({ name, oid }) => freshOids.get(name) !== oid).map(({ name }) => name),
+        ["list_draws", "search_tweets"],
+      );
+      assertEquals(await sql`select count(*)::int as views from pg_views where viewname = 'nasa_profile'`, [{
+        views: 1,
+      }]);
+      assertEquals(
+        await sql`select option_value as pages from pg_options_to_table(
+          (select srvoptions from pg_foreign_server where srvname = 'xquik_server')) where option_name = 'max_pages'`,
+        [{ pages: "50" }],
+      );
+    },
+  );
+
+  await step("a view on a changed foreign table stops the foreign tables migration until you drop it", async () => {
+    const fresh = await foreignTables();
+    await sql`create view public.nasa_posts as select attrs from xquik.search_tweets where q = 'NASA'`;
+    await sql`alter foreign table xquik.search_tweets options (set endpoint '/old')`;
+    assertEquals(await failure(() => query(client, foreignTablesMigration)), {
+      message: "cannot drop foreign table xquik.search_tweets because other objects depend on it",
+      hint: "Use DROP ... CASCADE to drop the dependent objects too.",
+    });
+    await sql`drop view public.nasa_posts`;
+    await query(client, foreignTablesMigration);
+    assertEquals(await foreignTables(), fresh);
+  });
 }
 
 Deno.test("the SQL functions and triggers on a throwaway Postgres 18 cluster", async (t) => {

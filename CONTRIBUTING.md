@@ -46,4 +46,7 @@ a fake Xquik server on this machine. If your Docker runs rootless, set
 ## Update the operations
 
 Replace `openapi.json` with the latest `https://xquik.com/openapi.json`. Then
-run `deno task generate` and commit the regenerated migration.
+run `deno task generate` and commit each migration it writes. It prints 1 line
+for the operation registry and 1 for the foreign tables. Each line names the
+latest migration and whether this run wrote it. It never changes the wrapper or
+the server, which `*_xquik_foreign_server.sql` creates once.

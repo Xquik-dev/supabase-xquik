@@ -1,8 +1,10 @@
-import { z } from "zod";
+import { FOREIGN_TABLES_SUFFIX, foreignTables, renderForeignTables } from "./foreign_tables.ts";
+import { type Method, type Operation, publicOperations } from "./openapi.ts";
+import { literal } from "./sql.ts";
 
 export const SPEC_PATH = "openapi.json";
 const MIGRATIONS = "supabase/migrations";
-const REGISTRY_SUFFIX = "_xquik_operations.sql";
+export const REGISTRY_SUFFIX = "_xquik_operations.sql";
 
 export function migrationFiles(): string[] {
   return Deno.readDirSync(MIGRATIONS).map((entry) => `${MIGRATIONS}/${entry.name}`).filter((path) =>
@@ -10,110 +12,27 @@ export function migrationFiles(): string[] {
   ).toArray().sort();
 }
 
-export function latestRegistryMigration(): string {
-  const latest = migrationFiles().filter((path) => path.endsWith(REGISTRY_SUFFIX)).at(-1);
-  if (latest === undefined) throw new Deno.errors.NotFound(`No *${REGISTRY_SUFFIX} migration in ${MIGRATIONS}`);
-  return latest;
+export function latestMigration(suffix: string): string | undefined {
+  return migrationFiles().findLast((path) => path.endsWith(suffix));
 }
-
-const METHODS = { get: "GET", put: "PUT", post: "POST", patch: "PATCH", delete: "DELETE" } as const;
-
-const securityRequirements = z.array(z.record(z.string(), z.array(z.string())));
-const document = z.object({
-  security: securityRequirements,
-  paths: z.record(z.string(), z.record(z.string(), z.unknown())),
-});
-const operation = z.object({
-  operationId: z.string().min(1),
-  security: securityRequirements.optional(),
-  responses: z.record(z.string(), z.unknown()),
-});
-const reference = z.object({ $ref: z.string().startsWith("#/") });
-const response = z.object({
-  content: z.record(z.string(), z.object({ schema: z.unknown() })).optional(),
-});
-const schemaNode = z.object({
-  type: z.union([z.string(), z.array(z.string())]).optional(),
-  properties: z.record(z.string(), z.unknown()).optional(),
-  required: z.array(z.string()).optional(),
-  allOf: z.array(z.unknown()).optional(),
-  oneOf: z.array(z.unknown()).optional(),
-  anyOf: z.array(z.unknown()).optional(),
-});
 
 export type OperationRow = {
   readonly operationId: string;
-  readonly method: (typeof METHODS)[keyof typeof METHODS];
+  readonly method: Method;
   readonly path: string;
   readonly kind: "read" | "write";
   readonly listField: string | null;
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+export function operationRows(operations: readonly Operation[]): OperationRow[] {
+  return operations.map(({ operationId, method, path, listField }): OperationRow => ({
+    operationId,
+    method,
+    path,
+    kind: method === "GET" ? "read" : "write",
+    listField,
+  }));
 }
-
-function resolve(root: unknown, value: unknown): unknown {
-  const parsed = reference.safeParse(value);
-  if (!parsed.success) return value;
-  const target = parsed.data.$ref
-    .slice(2)
-    .split("/")
-    .map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"))
-    .reduce<unknown>((node, token) => (isRecord(node) ? node[token] : undefined), root);
-  if (target === undefined) throw new Error(`openapi.json has a broken reference ${parsed.data.$ref}`);
-  return resolve(root, target);
-}
-
-function isArraySchema(root: unknown, value: unknown): boolean {
-  const { type } = schemaNode.parse(resolve(root, value));
-  return type === "array" || (Array.isArray(type) && type.includes("array"));
-}
-
-function firstRequiredArrayProperty(root: unknown, value: unknown): string | null {
-  const node = schemaNode.parse(resolve(root, value));
-  for (const [name, property] of Object.entries(node.properties ?? {})) {
-    if (node.required?.includes(name) && isArraySchema(root, property)) return name;
-  }
-  for (const member of node.allOf ?? []) {
-    const name = firstRequiredArrayProperty(root, member);
-    if (name !== null) return name;
-  }
-  const names = (node.oneOf ?? node.anyOf ?? []).map((variant) => firstRequiredArrayProperty(root, variant));
-  const [first] = names;
-  return first !== undefined && names.every((name) => name === first) ? first : null;
-}
-
-function listField(root: unknown, responses: Record<string, unknown>): string | null {
-  const ok = response.parse(resolve(root, responses["200"] ?? {}));
-  const json = ok.content?.["application/json"];
-  return json === undefined ? null : firstRequiredArrayProperty(root, json.schema);
-}
-
-export function operationRows(root: unknown): OperationRow[] {
-  const spec = document.parse(root);
-  const rows: OperationRow[] = [];
-  for (const [path, item] of Object.entries(spec.paths)) {
-    for (const [key, method] of Object.entries(METHODS)) {
-      if (item[key] === undefined) continue;
-      const op = operation.parse(item[key]);
-      const security = op.security ?? spec.security;
-      if (!security.some((requirement) => Object.keys(requirement).length === 0 || "apiKey" in requirement)) {
-        continue;
-      }
-      rows.push({
-        operationId: op.operationId,
-        method,
-        path,
-        kind: method === "GET" ? "read" : "write",
-        listField: listField(root, op.responses),
-      });
-    }
-  }
-  return rows.sort((a, b) => (a.operationId < b.operationId ? -1 : 1));
-}
-
-const literal = (value: string | null) => (value === null ? "null" : `'${value.replaceAll("'", "''")}'`);
 
 export function renderMigration(rows: readonly OperationRow[]): string {
   const values = rows
@@ -139,12 +58,20 @@ set method = excluded.method,
 }
 
 if (import.meta.main) {
-  const rows = operationRows(JSON.parse(await Deno.readTextFile(SPEC_PATH)));
-  const sql = renderMigration(rows);
-  const latest = migrationFiles().findLast((path) => path.endsWith(REGISTRY_SUFFIX));
-  const unchanged = latest !== undefined && await Deno.readTextFile(latest) === sql;
-  const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
-  const file = unchanged ? latest : `${MIGRATIONS}/${stamp}${REGISTRY_SUFFIX}`;
-  if (!unchanged) await Deno.writeTextFile(file, sql);
-  console.log(JSON.stringify({ operations: rows.length, file, changed: !unchanged }));
+  const root: unknown = JSON.parse(await Deno.readTextFile(SPEC_PATH));
+  const operations = publicOperations(root);
+  const rows = operationRows(operations);
+  const tables = foreignTables(operations);
+  const migrations = [
+    { count: { operations: rows.length }, suffix: REGISTRY_SUFFIX, sql: renderMigration(rows) },
+    { count: { foreignTables: tables.length }, suffix: FOREIGN_TABLES_SUFFIX, sql: renderForeignTables(tables) },
+  ];
+  for (const [offset, { count, suffix, sql }] of migrations.entries()) {
+    const latest = latestMigration(suffix);
+    const unchanged = latest !== undefined && await Deno.readTextFile(latest) === sql;
+    const stamp = new Date(Date.now() + offset * 1000).toISOString().replace(/\D/g, "").slice(0, 14);
+    const file = unchanged ? latest : `${MIGRATIONS}/${stamp}${suffix}`;
+    if (!unchanged) await Deno.writeTextFile(file, sql);
+    console.log(JSON.stringify({ ...count, file, changed: !unchanged }));
+  }
 }
