@@ -165,6 +165,37 @@ audit_dependencies() {
   "${deno}" audit && bun audit
 }
 
+run_codeql() {
+  local source="${workspace}/codeql-source" database="${workspace}/codeql-database"
+  local results="${workspace}/codeql-results.sarif" diagnostic="js/diagnostics/extraction-errors" unread count
+  mkdir "${source}" &&
+    git ls-files -z --cached --others --exclude-standard | tar --null -T - -cf - | tar -xf - -C "${source}" &&
+    codeql database create "${database}" --language=javascript --build-mode=none --source-root="${source}" \
+      --threads=0 >/dev/null &&
+    codeql database analyze "${database}" codeql/javascript-queries:codeql-suites/javascript-security-extended.qls \
+      --download --format=sarif-latest --output="${results}" --threads=0 >/dev/null || return
+  jq -e --arg id "${diagnostic}" 'any(.runs[].tool["driver"].notifications[]?; .id == $id)' "${results}" >/dev/null || {
+    echo "The CodeQL suite did not run ${diagnostic}, so the scan cannot show that it read every file." >&2
+    return 1
+  }
+  unread="$(jq -r --arg id "${diagnostic}" '
+    [.runs[].invocations[]?.toolExecutionNotifications[]? | select(.descriptor.id == $id)
+      | .locations[0].physicalLocation | "\(.artifactLocation.uri) at line \(.region.startLine)"]
+    | unique | join(" and ")' "${results}")" || return
+  [[ -z "${unread}" ]] || {
+    echo "CodeQL could not parse ${unread}, so the scan is incomplete." >&2
+    return 1
+  }
+  count="$(jq '[.runs[].results[]?] | length' "${results}")" || return
+  ((count == 0)) || {
+    jq -r '.runs[].results[] | .locations[0].physicalLocation as $at
+      | "\(.ruleId) \($at.artifactLocation.uri):\($at.region.startLine) \(.message.text)"' "${results}" >&2
+    echo "CodeQL found ${count} results." >&2
+    return 1
+  }
+  echo "CodeQL found no results."
+}
+
 lint_sql() {
   git ls-files -z -- '*.sql' | xargs -0 -r node_modules/.bin/squawk --assume-in-transaction
 }
@@ -187,6 +218,8 @@ run_check "" "Tests with 100% line, branch and function coverage" \
   "Fix the failing tests, or test the lines, branches and functions listed above." run_tests
 tests_passed="$(sed -nE 's/^ok \| ([0-9]+) passed.*/\1/p' "${workspace}/tests.log" | tail -n 1)"
 passed+=("${tests_passed:+${tests_passed} }tests at 100% coverage")
+run_check "CodeQL" "Static analysis with the CodeQL security-extended queries" \
+  "Fix the CodeQL findings above, then rerun." run_codeql
 
 current_check="Final tree check"
 if [[ -n "${status_commit}" ]]; then
