@@ -453,6 +453,25 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
     );
   });
 
+  await step("xquik.collect finds the sent actions among finished ones through xquik_actions_sent", async () => {
+    await sql`insert into public.xquik_actions (operation_id, status, request_id, finished_at)
+      select 'getAccount', 'succeeded', n, now() from generate_series(1, 10000) n`;
+    await enqueueAnswered([200, "application/json", '{"ok": true}']);
+    await sql`analyze public.xquik_actions`;
+    const [collect] = await sql`select prosrc as source from pg_proc where oid = 'xquik.collect'::regproc`;
+    assertArrayIncludes(await plannedIndexes(String(collect?.["source"])), ["xquik_actions_sent"]);
+    assertEquals(await sql`select xquik.collect() as finished`, [{ finished: 1 }]);
+  });
+
+  await step("reading events in order walks xquik_events_order", async () => {
+    await sql`insert into public.xquik_events (stream_event_id, event_type, occurred_at, payload)
+      select n::text, 'tweet.new', timestamptz '2026-10-28' + n * interval '1 second', '{}' from generate_series(1, 10000) n`;
+    await sql`analyze public.xquik_events`;
+    const ordered = "select stream_event_id from public.xquik_events order by occurred_at, stream_event_id limit 100";
+    assertArrayIncludes(await plannedIndexes(ordered), ["xquik_events_order"]);
+    assertEquals((await query(client, ordered)).length, 100);
+  });
+
   await step(
     "the registry migration looks up the actions of each stale operation through xquik_actions_operation_id",
     async () => {
