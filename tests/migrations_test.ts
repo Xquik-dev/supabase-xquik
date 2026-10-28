@@ -10,7 +10,7 @@ function isMigrationName(name: string): boolean {
   return !Number.isNaN(Date.parse(iso)) && new Date(iso).toISOString() === iso;
 }
 
-Deno.test("each migration is named <UTC timestamp>_<snake_case>.sql, as supabase migration new names it", () => {
+Deno.test("each migration is named <UTC timestamp>_<snake_case>.sql", () => {
   const misnamed = [...Deno.readDirSync("supabase/migrations")]
     .map((entry) => entry.name)
     .filter((name) => !isMigrationName(name))
