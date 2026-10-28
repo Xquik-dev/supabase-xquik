@@ -5,7 +5,8 @@
     "test": "deno test --allow-read --allow-write --allow-run --allow-env --allow-net tests/*_test.ts",
     "test:stack": "deno test --allow-all tests/stack/",
     "type-coverage": "git ls-files --cached --others --exclude-standard -- '*.ts' | xargs deno run --allow-read --allow-run --allow-env scripts/type_coverage.ts",
-    "generate": "deno run --allow-read=openapi.json,supabase/migrations --allow-write=supabase/migrations scripts/generate.ts"
+    "generate": "deno run --allow-read=openapi.json,supabase/migrations --allow-write=supabase/migrations scripts/generate.ts",
+    "types": "node_modules/.bin/supabase gen types typescript --local --schema public > supabase/functions/_shared/database.types.ts && deno fmt supabase/functions/_shared/database.types.ts"
   },
   "imports": {
     "@std/assert": "jsr:@std/assert@1",

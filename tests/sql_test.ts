@@ -1,11 +1,14 @@
 import { assert, assertArrayIncludes, assertEquals } from "@std/assert";
 import pg, { DatabaseError } from "pg";
 import { latestRegistryMigration, operationRows, SPEC_PATH } from "../scripts/generate.ts";
+import { Constants } from "../supabase/functions/_shared/database.types.ts";
 
 type Row = Record<string, unknown>;
 type Reply = readonly [status: number, type: string | null, content: string | null];
 
+const DENO = "node_modules/.bin/deno";
 const SUPABASE = "node_modules/.bin/supabase";
+const TYPES = "supabase/functions/_shared/database.types.ts";
 const XQUIK = "https://xquik.com";
 const KEY = { "x-api-key": "xq_test_key" };
 const CLIENT_ROLES = ["anon", "authenticated"];
@@ -515,6 +518,37 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
   );
 }
 
+async function formatted(source: string): Promise<string> {
+  const child = new Deno.Command(DENO, { args: ["fmt", "--ext=ts", "-"], stdin: "piped", stdout: "piped" }).spawn();
+  const writer = child.stdin.getWriter();
+  await writer.write(new TextEncoder().encode(source));
+  await writer.close();
+  const { success, stdout } = await child.output();
+  assert(success, "deno fmt formats the generated types");
+  return new TextDecoder().decode(stdout);
+}
+
+async function testCli(t: Deno.TestContext, client: pg.Client, url: string): Promise<void> {
+  await t.step("the Supabase advisors report nothing at any level", async () => {
+    await query(client, "select pg_stat_force_next_flush()");
+    await run(SUPABASE, ["db", "advisors", "--db-url", url, "--type", "all", "--level", "info", "--fail-on", "info"]);
+  });
+
+  await t.step(`${TYPES} matches supabase gen types for the public schema`, async () => {
+    const generated = await run(SUPABASE, ["gen", "types", "typescript", "--db-url", url, "--schema", "public"]);
+    assertEquals(await Deno.readTextFile(TYPES), await formatted(generated), "Run deno task types.");
+    assertEquals(
+      await query(
+        client,
+        `select coalesce(jsonb_object_agg(t.typname, (select jsonb_agg(e.enumlabel order by e.enumsortorder)
+          from pg_enum e where e.enumtypid = t.oid)), '{}') as enums
+        from pg_type t where t.typnamespace = 'public'::regnamespace and t.typtype = 'e'`,
+      ),
+      [{ enums: Constants.public.Enums }],
+    );
+  });
+}
+
 Deno.test("the SQL functions and triggers on a throwaway Postgres 18 cluster", async (t) => {
   const dir = await Deno.makeTempDir({ dir: "/tmp", prefix: "xquik-sql-" });
   try {
@@ -526,21 +560,7 @@ Deno.test("the SQL functions and triggers on a throwaway Postgres 18 cluster", a
       try {
         await applyMigrations(client, url);
         await testFunctions(t, client);
-        await t.step("the Supabase advisors report nothing at any level", async () => {
-          await query(client, "select pg_stat_force_next_flush()");
-          await run(SUPABASE, [
-            "db",
-            "advisors",
-            "--db-url",
-            url,
-            "--type",
-            "all",
-            "--level",
-            "info",
-            "--fail-on",
-            "info",
-          ]);
-        });
+        await testCli(t, client, url);
       } finally {
         await client.end();
       }
