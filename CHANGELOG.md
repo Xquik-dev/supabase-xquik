@@ -30,3 +30,5 @@
 - Fail the checks on any mutant that a test can observe and no test catches.
   `scripts/equivalent_mutants.json` lists each mutant that no test can observe,
   with the reason.
+- Fail the checks when a change edits, renames or deletes a migration that is
+  on `main`, or replaces it with a symbolic link.
