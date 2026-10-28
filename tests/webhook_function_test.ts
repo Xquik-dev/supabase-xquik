@@ -1,20 +1,27 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { post, randomNonce, sampleEvent, SECRET, signDelivery, statusesInOrder, TEST_ALERT } from "./delivery.ts";
+import { answersInOrder, post, randomNonce, sampleEvent, SECRET, signDelivery, TEST_ALERT } from "./delivery.ts";
 import parseJson from "@shared/json.ts";
-import type { SampleEvent } from "./delivery.ts";
 
 const FUNCTION = new URL("../supabase/functions/xquik-webhook/index.ts", import.meta.url);
 const SERVICE_ROLE_KEY = "service-role-key";
 const STORE_DOWN = "store-down";
 const BARE_EVENT = { eventType: "tweet.new", occurredAt: "2026-10-28T19:00:00Z", streamEventId: "9002" };
+const NASA_EVENT = {
+  data: { id: "1893456789012345678", text: "Liftoff." },
+  deliveryId: "502",
+  eventType: "tweet.new",
+  monitorId: "10",
+  monitorType: "account",
+  occurredAt: "2026-02-24T14:22:00.000Z",
+  schemaVersion: 1,
+  streamEventId: "9001",
+  username: "NASA",
+  xUserId: "11348282",
+};
 const CONNECTION: Deno.ServeHandlerInfo = {
   completed: Promise.resolve(),
   remoteAddr: { hostname: "127.0.0.1", port: 0, transport: "tcp" },
 };
-const OK = 200;
-const UNAUTHORIZED = 401;
-const NOT_ALLOWED = 405;
-const UNAVAILABLE = 503;
 const EXIT_FAILURE = 1;
 const LAST = -1;
 
@@ -22,6 +29,8 @@ type Handler = (request: Request) => Promise<Response>;
 interface Received {
   readonly table: string;
   readonly apiKey: string | null;
+  readonly query: string;
+  readonly prefer: string | null;
   readonly body: unknown;
 }
 interface Postgrest {
@@ -62,10 +71,13 @@ function fakeTables(): ReadonlyMap<string, FakeTable> {
 }
 
 async function receive(request: Request, received: Received[]): Promise<Received> {
+  const { pathname, search } = new URL(request.url);
   const entry: Received = {
     apiKey: request.headers.get("apikey"),
     body: parseJson(await request.text()),
-    table: new URL(request.url).pathname.replace("/rest/v1/", ""),
+    prefer: request.headers.get("prefer"),
+    query: search,
+    table: pathname.replace("/rest/v1/", ""),
   };
   received.push(entry);
   return entry;
@@ -133,7 +145,17 @@ async function signedPost(body: unknown, nonce = randomNonce()): Promise<Request
   return post(signed);
 }
 
-function assertReceived(received: readonly Received[], event: SampleEvent): void {
+function assertUpserts(received: readonly Received[]): void {
+  const upserts = received.filter(({ table }) => table === "xquik_events");
+  assertEquals(
+    new Set(upserts.map(({ query, prefer }) => `${query} ${String(prefer)}`)),
+    new Set([
+      "?on_conflict=stream_event_id&select=stream_event_id resolution=ignore-duplicates, return=representation",
+    ]),
+  );
+}
+
+function assertReceived(received: readonly Received[]): void {
   assertEquals(new Set(received.map((request) => request.apiKey)), new Set([SERVICE_ROLE_KEY]));
   assertEquals(received.map((request) => request.table), [
     "xquik_webhook_nonces",
@@ -161,9 +183,10 @@ function assertReceived(received: readonly Received[], event: SampleEvent): void
     event_type: "tweet.new",
     monitor_id: "10",
     occurred_at: "2026-02-24T14:22:00.000Z",
-    payload: event,
+    payload: NASA_EVENT,
     stream_event_id: "9001",
   });
+  assertUpserts(received);
 }
 
 Deno.test("the xquik-webhook function stores each event once through PostgREST as the service role", async () => {
@@ -182,9 +205,17 @@ Deno.test("the xquik-webhook function stores each event once through PostgREST a
       Promise.resolve(new Request("http://localhost/functions/v1/xquik-webhook")),
       signedPost(BARE_EVENT),
     ]);
-    const statuses = await statusesInOrder(handle, requests);
-    assertEquals(statuses, [OK, OK, UNAUTHORIZED, OK, UNAVAILABLE, UNAVAILABLE, NOT_ALLOWED, OK]);
-    assertReceived(postgrest.received, event);
+    assertEquals(await answersInOrder(handle, requests), [
+      "200 Stored the event.",
+      "200 Already stored this event.",
+      "401 This nonce was already used.",
+      "200 Received the test alert.",
+      "503 Could not store the delivery. Xquik will retry it.",
+      "503 Could not store the delivery. Xquik will retry it.",
+      "405 Send deliveries with POST.",
+      "200 Stored the event.",
+    ]);
+    assertReceived(postgrest.received);
   } finally {
     await postgrest.server.shutdown();
   }

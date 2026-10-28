@@ -123,8 +123,8 @@ async function verifyDelivery(
   if (isStale(timestamp, nowMs)) {
     return { ok: false, reason: "stale" };
   }
-  const nonce = headers.get("x-xquik-nonce") ?? "";
-  if (!(await isSigned(headers, secrets, { nonce, rawBody, timestamp }))) {
+  const nonce = headers.get("x-xquik-nonce");
+  if (nonce === null || !(await isSigned(headers, secrets, { nonce, rawBody, timestamp }))) {
     return { ok: false, reason: "signature" };
   }
   const parsed = deliveryBody.safeParse(decodeJson(rawBody));

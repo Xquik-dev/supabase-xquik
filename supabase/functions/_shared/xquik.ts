@@ -65,8 +65,11 @@ async function askDocs(
   const body: unknown = parseJson(await response.text());
   if (!response.ok) {
     const parsed = failure.safeParse(body);
-    const message = parsed.data?.error.message ?? "";
-    throw new Error(`Xquik docs search returned HTTP ${String(response.status)}. ${message}`);
+    const status = `Xquik docs search returned HTTP ${String(response.status)}.`;
+    if (parsed.success) {
+      throw new Error(`${status} ${parsed.data.error.message}`);
+    }
+    throw new Error(status);
   }
   return answer.parse(body);
 }

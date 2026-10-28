@@ -5,7 +5,6 @@ const NOW = Date.parse("2026-10-28T19:00:00.000Z");
 const RECEIVER_URL = "http://localhost/functions/v1/xquik-webhook";
 const HEX_RADIX = 16;
 const HEX_DIGITS_PER_BYTE = 2;
-const NONCE_BYTES = 16;
 
 const encoder = new TextEncoder();
 const EXTRACTABLE = false;
@@ -51,7 +50,14 @@ function hex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(HEX_RADIX).padStart(HEX_DIGITS_PER_BYTE, "0")).join("");
 }
 
-async function sign(secret: string, timestamp: string, nonce: string, body: string): Promise<string> {
+function bytesOf(body: string | Uint8Array): Uint8Array {
+  if (typeof body === "string") {
+    return encoder.encode(body);
+  }
+  return body;
+}
+
+async function sign(secret: string, timestamp: string, nonce: string, body: string | Uint8Array): Promise<string> {
   const key = await crypto.subtle.importKey(
     "raw",
     encoder.encode(secret),
@@ -59,12 +65,13 @@ async function sign(secret: string, timestamp: string, nonce: string, body: stri
     EXTRACTABLE,
     ["sign"],
   );
-  const mac = await crypto.subtle.sign("HMAC", key, encoder.encode(`${timestamp}.${nonce}.${body}`));
+  const message = new Uint8Array([...encoder.encode(`${timestamp}.${nonce}.`), ...bytesOf(body)]);
+  const mac = await crypto.subtle.sign("HMAC", key, message);
   return `sha256=${hex(new Uint8Array(mac))}`;
 }
 
 function randomNonce(): string {
-  return hex(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)));
+  return crypto.randomUUID();
 }
 
 interface Signed {
@@ -79,7 +86,6 @@ async function signDelivery(
 ): Promise<Signed> {
   const signature = await sign(secret, timestamp, nonce, body);
   const headers = new Headers({
-    "content-type": "application/json",
     "x-xquik-nonce": nonce,
     "x-xquik-signature": signature,
     "x-xquik-timestamp": timestamp,
@@ -91,17 +97,18 @@ function post({ headers, body }: Signed, url = RECEIVER_URL): Request {
   return new Request(url, { body, headers, method: "POST" });
 }
 
-async function statusesInOrder(
-  handle: (request: Request) => Promise<Response>,
-  requests: readonly Request[],
-): Promise<number[]> {
-  const [first, ...rest] = requests;
+async function answersInOrder<Item extends object>(
+  handle: (item: Item) => Promise<Response>,
+  items: readonly Item[],
+): Promise<string[]> {
+  const [first, ...rest] = items;
   if (!first) {
     return [];
   }
   const response = await handle(first);
-  const later = await statusesInOrder(handle, rest);
-  return [response.status, ...later];
+  const text = await response.text();
+  const later = await answersInOrder(handle, rest);
+  return [`${String(response.status)} ${text}`, ...later];
 }
 
 interface MemoryStore {
@@ -151,6 +158,7 @@ function receiver(store: DeliveryStore, secrets: readonly string[] = [SECRET]): 
 }
 
 export {
+  answersInOrder,
   memoryStore,
   NOW,
   post,
@@ -161,7 +169,6 @@ export {
   SECRET,
   sign,
   signDelivery,
-  statusesInOrder,
   TEST_ALERT,
 };
 export type { MemoryStore, Receiver, SampleEvent, Signed };

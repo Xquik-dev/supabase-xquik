@@ -1,6 +1,7 @@
 import type { DeliveryDeps, DeliveryStore } from "@shared/webhook.ts";
 import { handleDelivery, parseSecrets, verifyDelivery } from "@shared/webhook.ts";
 import {
+  answersInOrder,
   memoryStore,
   NOW,
   post,
@@ -8,8 +9,8 @@ import {
   RECEIVER_URL,
   sampleEvent,
   SECRET,
+  sign,
   signDelivery,
-  statusesInOrder,
   TEST_ALERT,
 } from "./delivery.ts";
 import { assertEquals } from "@std/assert";
@@ -28,6 +29,7 @@ const RETRY_DELAY_MS = 1000;
 const START = 0;
 const NEXT = 1;
 const DROP_LAST = -1;
+const NOT_UTF8 = 0xFF;
 
 async function reason(signed: { headers: Headers; body: string }): Promise<string> {
   const verdict = await verifyDelivery(
@@ -129,7 +131,8 @@ Deno.test("deduplicates events on streamEventId", async () => {
     const signed = await signDelivery(JSON.stringify(sampleEvent("tweet.new", { deliveryId })));
     return post(signed);
   }));
-  assertEquals(await statusesInOrder(handlerFor(deps), requests), [OK, OK]);
+  const answers = await answersInOrder(handlerFor(deps), requests);
+  assertEquals(answers, ["200 Stored the event.", "200 Already stored this event."]);
   assertEquals(events.get("9001")?.deliveryId, "502");
   assertEquals(events.size, ONE_EVENT);
   assertEquals(scheduled.length, ONE_EVENT);
@@ -143,11 +146,31 @@ Deno.test("acks the test alert without storing it", async () => {
   assertEquals(scheduled.length, NO_EVENTS);
 });
 
-Deno.test("stores event types it has never seen", async () => {
+Deno.test("ignores a signed body that is not UTF-8", async () => {
+  const rawBody = new Uint8Array([
+    ...encoder.encode(`${EVENT.slice(START, DROP_LAST)},"note":"`),
+    NOT_UTF8,
+    ...encoder.encode('"}'),
+  ]);
+  const timestamp = String(NOW);
+  const headers = new Headers({
+    "x-xquik-nonce": "nonce",
+    "x-xquik-signature": await sign(SECRET, timestamp, "nonce", rawBody),
+    "x-xquik-timestamp": timestamp,
+  });
+  assertEquals(await verifyDelivery({ headers, rawBody }, [SECRET], NOW), { ok: false, reason: "malformed" });
+});
+
+Deno.test("rejects an empty nonce even when the signature covers it", async () => {
+  assertEquals(await reason(await signDelivery(EVENT, { nonce: "" })), "signature");
+});
+
+Deno.test("stores event types it has never seen, with an occurredAt that has a numeric offset", async () => {
   const { events, store } = memoryStore();
-  const body = JSON.stringify(sampleEvent("tweet.from_the_future"));
+  const body = JSON.stringify({ ...sampleEvent("tweet.from_the_future"), occurredAt: "2026-02-24T17:22:00.000+03:00" });
   assertEquals(await deliver(body, receiver(store).deps), OK);
-  assertEquals(events.get("9001")?.eventType, "tweet.from_the_future");
+  const stored = events.get("9001");
+  assertEquals([stored?.eventType, stored?.occurredAt], ["tweet.from_the_future", "2026-02-24T17:22:00.000+03:00"]);
 });
 
 Deno.test("acks a signed body that is not an event without storing it", async () => {
@@ -176,7 +199,7 @@ Deno.test("accepts deliveries signed with any configured secret", async () => {
     return post(await signDelivery(body, { secret }));
   }));
   const { deps } = receiver(store, secrets);
-  assertEquals(await statusesInOrder(handlerFor(deps), requests), [OK, OK]);
+  assertEquals(await answersInOrder(handlerFor(deps), requests), ["200 Stored the event.", "200 Stored the event."]);
   assertEquals([...events.keys()], ["900", "901"]);
 });
 
@@ -203,35 +226,41 @@ Deno.test("answers 405 to anything but POST", async () => {
   assertEquals([unsigned.status, unsigned.headers.get("allow")], [UNAUTHORIZED, null]);
 });
 
-Deno.test("never puts the secret or the signature in a response", async () => {
+Deno.test("answers each outcome with a sentence for the delivery log that shows no secret or signature", async () => {
   const { store } = memoryStore();
   const signed = await signDelivery(EVENT);
-  const requests = [
-    post(signed),
-    post(signed),
-    post(await signDelivery(EVENT, { secret: "another-secret" })),
-    post(await signDelivery(EVENT, { timestamp: "0" })),
-    post(await signDelivery(JSON.stringify(TEST_ALERT))),
-    post(await signDelivery("not json")),
-    new Request(RECEIVER_URL),
-  ];
   const failing: DeliveryStore = {
     claimNonce: async () => await Promise.reject(new Error(SECRET)),
     saveEvent: async (event) => await store.saveEvent(event),
   };
-  const failingRequest = post(await signDelivery(EVENT));
-  const responses = await Promise.all([
-    ...requests.map(async (request) => await handleDelivery(request, receiver(store).deps)),
-    handleDelivery(failingRequest, receiver(failing).deps),
+  const deliveries: ReadonlyArray<readonly [Request, DeliveryStore]> = [
+    [post(signed), store],
+    [post(signed), store],
+    [post(await signDelivery(EVENT)), store],
+    [post(await signDelivery(EVENT, { secret: "another-secret" })), store],
+    [post(await signDelivery(EVENT, { timestamp: "0" })), store],
+    [post(await signDelivery(JSON.stringify(TEST_ALERT))), store],
+    [post(await signDelivery("not json")), store],
+    [new Request(RECEIVER_URL), store],
+    [post(await signDelivery(EVENT)), failing],
+  ];
+  const shown: Array<[string, string]> = [];
+  const answers = await answersInOrder(async ([request, using]): Promise<Response> => {
+    const response = await handleDelivery(request, receiver(using).deps);
+    shown.push(...response.headers);
+    return response;
+  }, deliveries);
+  assertEquals(answers, [
+    "200 Stored the event.",
+    "401 This nonce was already used.",
+    "200 Already stored this event.",
+    "401 The signature does not match.",
+    "401 The timestamp is more than 5 minutes off.",
+    "200 Received the test alert.",
+    "200 Ignored a signed body that is not an Xquik event.",
+    "405 Send deliveries with POST.",
+    "503 Could not store the delivery. Xquik will retry it.",
   ]);
-  assertEquals(
-    new Set(responses.map((response) => response.status)),
-    new Set([OK, UNAUTHORIZED, NOT_ALLOWED, UNAVAILABLE]),
-  );
-  const visible = await Promise.all(responses.map(async (response) => {
-    const text = await response.text();
-    return `${[...response.headers].join(" ")} ${text}`;
-  }));
   const mac = signed.signature.slice("sha256=".length);
-  assertEquals(visible.filter((shown) => shown.includes(SECRET) || shown.includes(mac)), []);
+  assertEquals(shown.flat().filter((value) => value.includes(SECRET) || value.includes(mac)), []);
 });

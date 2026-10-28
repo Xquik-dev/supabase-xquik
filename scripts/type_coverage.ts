@@ -24,7 +24,6 @@ const ONE_BASED = 1;
 const NONE = 0;
 const FULL = 100;
 const PERCENT_DECIMALS = 2;
-const SET_PARENT_NODES = true;
 const KEYWORD_LITERALS = new Set([ts.SyntaxKind.TrueKeyword, ts.SyntaxKind.FalseKeyword, ts.SyntaxKind.NullKeyword]);
 
 const resolved = z.object({ specifier: z.string() });
@@ -110,15 +109,13 @@ function compilerHost(options: ts.CompilerOptions, graph: Graph, denoTypes: stri
   };
   return {
     ...host,
-    fileExists: (fileName) => sources.has(fileName) || host.fileExists(fileName),
     getSourceFile: (fileName, languageVersion) => {
       const text = sources.get(fileName);
       if (typeof text === "string") {
-        return ts.createSourceFile(fileName, text, languageVersion, SET_PARENT_NODES, ts.ScriptKind.TS);
+        return ts.createSourceFile(fileName, text, languageVersion);
       }
       return host.getSourceFile(fileName, languageVersion);
     },
-    readFile: (fileName) => sources.get(fileName) ?? host.readFile(fileName),
     resolveModuleNameLiterals: (literals, containingFile) =>
       literals.map((literal) => resolve(literal.text, containingFile)),
   };
@@ -209,10 +206,8 @@ async function readConfig(root: string): Promise<Pick<ts.ParsedCommandLine, "err
   const converted = ts.convertCompilerOptionsFromJson(compilerOptions, root);
   const options: ts.CompilerOptions = {
     ...converted.options,
-    allowImportingTsExtensions: true,
     module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler,
-    noEmit: true,
     target: ts.ScriptTarget.ESNext,
     types: [],
   };

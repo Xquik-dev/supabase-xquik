@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { z } from "zod";
 
 interface Mutant {
   readonly file: string;
@@ -9,11 +10,33 @@ interface Mutant {
   readonly replacement: string;
 }
 type Rewrite = readonly [pattern: RegExp, replace: (match: string) => string];
+interface Source {
+  readonly text: string;
+  readonly mutants: readonly Mutant[];
+}
+interface Plan {
+  readonly mutants: readonly Mutant[];
+  readonly equivalent: number;
+  readonly stale: readonly string[];
+}
 
 const SET_PARENT_NODES = true;
 const TEXT_START = 0;
 const SQL_NUMBER_STEP = 1;
 const QUOTES_ONLY = 2;
+const MIN_REASON_LENGTH = 1;
+const EXACTLY_ONE = 1;
+const REGEXP_SYNTAX = /[$()*+.?[\\\]^{|}]/gu;
+const WHITESPACE = /\s+/u;
+
+const equivalents = z.array(z.strictObject({
+  context: z.string(),
+  file: z.string(),
+  original: z.string(),
+  reason: z.string().min(MIN_REASON_LENGTH),
+  replacement: z.string(),
+}));
+type Equivalent = z.infer<typeof equivalents>[number];
 
 const OPERATORS = new Map<ts.SyntaxKind, string>([
   [ts.SyntaxKind.EqualsEqualsEqualsToken, "!=="],
@@ -172,5 +195,43 @@ function mutantsOf(file: string, text: string): Mutant[] {
   return typescriptMutants(file, text);
 }
 
-export default mutantsOf;
-export type { Mutant };
+function spans(text: string, context: string): Array<readonly [from: number, to: number]> {
+  const words = context.split(WHITESPACE).map((word) => word.replaceAll(REGEXP_SYNTAX, String.raw`\$&`));
+  const found = [...text.matchAll(new RegExp(words.join(String.raw`\s+`), "gu"))];
+  return found.map((match) => [match.index, match.index + match[0].length] as const);
+}
+
+function claimed(sources: ReadonlyMap<string, Source>, entry: Equivalent): readonly Mutant[] {
+  const source = sources.get(entry.file);
+  if (!source) {
+    return [];
+  }
+  const found = spans(source.text, entry.context);
+  return source.mutants.filter((mutant) =>
+    mutant.original === entry.original && mutant.replacement === entry.replacement &&
+    found.some(([from, to]) => from <= mutant.start && mutant.end <= to)
+  );
+}
+
+function staleLine(entry: Equivalent, count: number): string {
+  return `${entry.file} has ${String(count)} mutants that replace ${JSON.stringify(entry.original)} with ${
+    JSON.stringify(entry.replacement)
+  } inside ${JSON.stringify(entry.context)}, and an equivalent entry must name exactly 1.`;
+}
+
+function plan(texts: ReadonlyMap<string, string>, entries: readonly Equivalent[]): Plan {
+  const sources = new Map([...texts].map(([file, text]) => [file, { mutants: mutantsOf(file, text), text }] as const));
+  const claims = entries.map((entry) => ({ entry, named: claimed(sources, entry) }));
+  const equivalent = new Set(claims.filter(({ named }) => named.length === EXACTLY_ONE).flatMap(({ named }) => named));
+  const all = [...sources.values()].flatMap((source) => source.mutants);
+  return {
+    equivalent: equivalent.size,
+    mutants: all.filter((mutant) => !equivalent.has(mutant)),
+    stale: claims.filter(({ named }) => named.length !== EXACTLY_ONE).map(({ entry, named }) =>
+      staleLine(entry, named.length)
+    ),
+  };
+}
+
+export { equivalents, mutantsOf, plan };
+export type { Equivalent, Mutant };

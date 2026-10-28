@@ -1,0 +1,79 @@
+[
+  {
+    "file": "scripts/mutants.ts",
+    "context": "const BODY_START = \"as $$\".length;",
+    "original": "\"as $$\"",
+    "replacement": "\"\"",
+    "reason": "No rewrite matches inside the as $$ prefix, so scanning it adds no mutant and moves no offset."
+  },
+  {
+    "file": "scripts/mutants.ts",
+    "context": "start >= from",
+    "original": ">=",
+    "replacement": ">",
+    "reason": "Only the string rewrite matches text that starts with a quote, and it skips this check."
+  },
+  {
+    "file": "scripts/type_coverage.ts",
+    "context": "DENO_LIB_REFERENCE, \"\")",
+    "original": "\"\"",
+    "replacement": "\"mutant\"",
+    "reason": "The text replaces a lib reference in lib.deno.d.ts, whose diagnostics the program never reads."
+  },
+  {
+    "file": "scripts/type_coverage.ts",
+    "context": "verdicts.set(type, verdict);",
+    "original": "verdicts.set(type, verdict);",
+    "replacement": ";",
+    "reason": "It drops the cache of a pure check, so only the run time changes."
+  },
+  {
+    "file": "supabase/functions/_shared/webhook.ts",
+    "context": "const EXTRACTABLE = false;",
+    "original": "false",
+    "replacement": "true",
+    "reason": "The key never leaves signedByAny, so no code can try to export it."
+  },
+  {
+    "file": "supabase/functions/_shared/webhook.ts",
+    "context": "headers.get(\"x-xquik-timestamp\") ?? \"\"",
+    "original": "\"\"",
+    "replacement": "\"mutant\"",
+    "reason": "A missing header and the replacement text both fail the digits pattern, so both answer stale."
+  },
+  {
+    "file": "supabase/functions/_shared/webhook.ts",
+    "context": "headers.get(\"x-xquik-signature\") ?? \"\"",
+    "original": "\"\"",
+    "replacement": "\"mutant\"",
+    "reason": "A missing header and the replacement text both fail the sha256 pattern, so both answer signature."
+  },
+  {
+    "file": "supabase/migrations/20261028000000_xquik.sql",
+    "context": "coalesce(content, '')",
+    "original": "''",
+    "replacement": "'mutant'",
+    "reason": "A null content gives null on every branch, so the default text never decides."
+  },
+  {
+    "file": "tests/delivery.ts",
+    "context": "const EXTRACTABLE = false;",
+    "original": "false",
+    "replacement": "true",
+    "reason": "The key never leaves sign, so no code can try to export it."
+  },
+  {
+    "file": "tests/delivery.ts",
+    "context": "message: \"Test delivery from Xquik\"",
+    "original": "\"Test delivery from Xquik\"",
+    "replacement": "\"\"",
+    "reason": "The receiver reads only the eventType of a test alert."
+  },
+  {
+    "file": "tests/delivery.ts",
+    "context": "timestamp: \"2026-10-28T19:00:00.000Z\"",
+    "original": "\"2026-10-28T19:00:00.000Z\"",
+    "replacement": "\"\"",
+    "reason": "The receiver reads only the eventType of a test alert."
+  }
+]

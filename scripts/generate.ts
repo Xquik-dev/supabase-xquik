@@ -13,7 +13,6 @@ const NOT_STAMP = /\.\d{3}Z$|\D/gv;
 const SUMMARY_KEYS = ["operations", "foreignTables", "file", "changed"];
 const MIGRATION_FILES = Deno.readDirSync(MIGRATIONS)
   .map((entry) => `${MIGRATIONS}/${entry.name}`)
-  .filter((path) => path.endsWith(".sql"))
   .toArray()
   .toSorted();
 
