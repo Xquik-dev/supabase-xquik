@@ -37,9 +37,9 @@ Checked on 2026-10-28. See each number with its date & source on [xquik.com/trus
 
 - A typed Xquik client for Edge Functions in `supabase/functions/_shared/xquik.ts`.
 - `xquik.call`, `xquik.rows`, `xquik.enqueue` & `xquik.schedule` for SQL, cron jobs & triggers.
-- Foreign tables in the `xquik` schema for public reads. Query them with `select`.
+- Foreign tables in the `xquik` schema for public reads.
 - The `xquik-webhook` Edge Function. It checks each delivery's signature & stores each event once.
-- Row level security on every table, with no policies. Only the service role reads them.
+- Row level security on every regular table, with no policies. Only the service role reads them.
 
 ## Start everything with 1 command
 
