@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
-import { type Mutant, mutantsOf, runMutants, summary } from "../scripts/mutation.ts";
+import { type Mutant, mutantsOf, type Result, runMutants, score, summary } from "../scripts/mutation.ts";
 
 const REPO = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const SCRIPT = `${REPO}/scripts/mutate.ts`;
@@ -171,6 +171,16 @@ Deno.test("scores 100% when no mutant counts", () => {
       "0 of 0 mutants did not compile.",
     ].join(" "),
   );
+});
+
+Deno.test("scores the percentage the summary prints, rounded to 2 decimals", () => {
+  const mutant: Mutant = { file: "math.ts", line: 2, start: 50, end: 51, original: "+", replacement: "-" };
+  const results: Result[] = [{ mutant, outcome: "killed" }, { mutant, outcome: "killed" }, {
+    mutant,
+    outcome: "survived",
+  }];
+  assertEquals(score(results), 66.67);
+  assertEquals(summary(results).split("\n").at(-1)?.startsWith("Mutation score is 66.67%."), true);
 });
 
 Deno.test("the command lists each survivor and exits 1 only below the minimum score", async () => {
