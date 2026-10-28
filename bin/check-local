@@ -85,7 +85,7 @@ deno=node_modules/.bin/deno
 run_check "format" "Format check" "Run $deno fmt, then rerun." "$deno" fmt --check
 run_check "lint" "Lint" "Fix the lint findings above." "$deno" lint
 run_check "types" "Type check" "Fix the type errors above." "$deno" check
-run_check "tests" "Tests" "Fix the failing tests above." "$deno" test --allow-read --allow-env tests/*_test.ts
+run_check "tests" "Tests" "Fix the failing tests above." "$deno" test --allow-read --allow-env --allow-write=/tmp --allow-net --allow-run=initdb,pg_ctl tests/*_test.ts
 
 current_check="Final tree check"
 if [[ -n "$status_commit" ]]; then

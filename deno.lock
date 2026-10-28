@@ -212,6 +212,7 @@
     "dependencies": [
       "jsr:@std/assert@1",
       "npm:@supabase/supabase-js@2",
+      "npm:@types/pg@8",
       "npm:pg@8",
       "npm:x-twitter-scraper@0.18.0",
       "npm:zod@4"

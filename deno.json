@@ -2,12 +2,13 @@
   "nodeModulesDir": "auto",
   "tasks": {
     "check": "deno fmt --check && deno lint && deno check",
-    "test": "deno test --allow-read --allow-env tests/*_test.ts",
+    "test": "deno test --allow-read --allow-env --allow-write=/tmp --allow-net --allow-run=initdb,pg_ctl tests/*_test.ts",
     "test:stack": "deno test --allow-all tests/stack/",
     "generate": "deno run --allow-read=openapi.json --allow-write=supabase/migrations scripts/generate.ts"
   },
   "imports": {
     "@std/assert": "jsr:@std/assert@1",
+    "@types/pg": "npm:@types/pg@8",
     "@supabase/supabase-js": "npm:@supabase/supabase-js@2",
     "pg": "npm:pg@8",
     "x-twitter-scraper": "npm:x-twitter-scraper@0.18.0",
