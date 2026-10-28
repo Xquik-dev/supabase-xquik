@@ -41,7 +41,7 @@ Use the same `XQUIK_WEBHOOK_SECRET` that `supabase start` read. The tests start
 a fake Xquik server on this machine. If your Docker runs rootless, set
 `XQUIK_STACK_HOST` to an address of this machine that containers can reach.
 
-`bin/check-local` does not run the stack tests, because they need Docker and a running project. Run them yourself when you change the migrations or the webhook function. The lint, format, type and type coverage checks still read `tests/stack/`.
+`bin/check-local` runs the stack tests without Docker through `bin/check-stack`. That script needs Linux x86_64, Go, curl, jq and openssl. It pulls the Postgres, Edge Runtime and PostgREST images that Supabase CLI 2.122.0 pins, by digest, and caches them in `~/.cache/supabase-xquik-stack`. It runs their binaries on the host, applies the migrations as `supabase start` does and serves the function through the CLI's own main service. `tests/stack/gateway.ts` stands in for Kong. It strips the `/rest/v1/` and `/functions/v1/` prefixes and turns the local secret and publishable keys into JWTs the way the CLI's Kong does.
 
 ## Update the operations
 

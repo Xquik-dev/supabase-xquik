@@ -3,12 +3,12 @@ import pg, { DatabaseError } from "pg";
 import { z } from "zod";
 import { post, randomNonce, sampleEvent, sign, TEST_ALERT } from "../delivery.ts";
 
-const status = new TextDecoder().decode(
+const status = Deno.env.has("DB_URL") ? "" : new TextDecoder().decode(
   (await new Deno.Command("supabase", { args: ["status", "-o", "env"], stderr: "null" }).output()).stdout,
 );
 const env = new Map([...status.matchAll(/^([A-Z_]+)="(.*)"$/gm)].map(([, name, value]) => [name, value]));
-const DB_URL = z.string().parse(env.get("DB_URL"));
-const FUNCTIONS_URL = z.string().parse(env.get("FUNCTIONS_URL"));
+const DB_URL = z.string().parse(Deno.env.get("DB_URL") ?? env.get("DB_URL"));
+const FUNCTIONS_URL = z.string().parse(Deno.env.get("FUNCTIONS_URL") ?? env.get("FUNCTIONS_URL"));
 const HOST_FROM_DOCKER = Deno.env.get("XQUIK_STACK_HOST") ?? "host.docker.internal";
 const WEBHOOK_SECRET = z.string().min(1).parse(Deno.env.get("XQUIK_WEBHOOK_SECRET")?.split(",")[0]?.trim());
 

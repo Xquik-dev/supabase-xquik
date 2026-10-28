@@ -242,6 +242,8 @@ run_check "" "Tests with 100% line, branch and function coverage" \
   "Fix the failing tests, run the ignored ones, or test the lines, branches and functions listed above." run_tests
 tests_passed="$(sed -nE 's/^ok \| ([0-9]+) passed.*/\1/p' "${workspace}/tests.log" | tail -n 1)"
 passed+=("${tests_passed:+${tests_passed} }tests at 100% coverage")
+run_check "stack test" "Stack test on the pinned Supabase images without Docker" \
+  "Fix the failing stack steps above. The service logs above show why a service failed." bin/check-stack
 run_check "CodeQL" "Static analysis with the CodeQL security-extended queries" \
   "Fix the CodeQL findings above, then rerun." run_codeql
 

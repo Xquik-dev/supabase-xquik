@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Run the stack tests in `bin/check-local` on the pinned Supabase images,
+  without Docker.
 - Add the Supabase project with the Xquik operation registry, SQL functions and
   cron jobs.
 - Add the `xquik-webhook` Edge Function that checks signatures and stores each

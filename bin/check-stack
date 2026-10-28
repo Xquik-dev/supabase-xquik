@@ -1,0 +1,270 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Xquik Contributors
+# SPDX-License-Identifier: Apache-2.0
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+crane_version="v0.20.6"
+cli_version="v2.122.0"
+postgres_image="supabase/postgres"
+postgres_digest="sha256:80700a6f21573b4fdf82927ab9deac3910690fb81b093ce47ee7eaf55ea9761d"
+edge_runtime_image="supabase/edge-runtime"
+edge_runtime_digest="sha256:4cf4effe7ef7f105ef5dea28a9b61eafd10f824b0e5e2b24e1fb3b4335154d04"
+postgrest_image="postgrest/postgrest"
+postgrest_digest="sha256:f3f2a7541965792e51717d10341e09971ea41409dd38e12ea0453042a750c00e"
+serve_main_sha256="85a6ff68c2b0be14fe68eecd6bd373290c43aa55119f6ddca94ae7779569de02"
+serve_main_deps_sha256="26e66cebb14bc4ebf765d3ea3b84b1d841f3c7e86539ecb5fac2ded25eaa3e1d"
+store_link="/tmp/nixst"
+
+password="postgres"
+
+deno="$(node_modules/.bin/deno eval --quiet 'console.log(Deno.execPath())')"
+cache="${XDG_CACHE_HOME:-${HOME}/.cache}/supabase-xquik-stack"
+run="$(mktemp -d "${TMPDIR:-/tmp}/supabase-xquik-stack.XXXXXX")"
+pids=()
+
+stop_stack() {
+  local status=$? pid log
+  if ((status != 0)); then
+    for log in "${run}"/*.log; do
+      [[ -f "${log}" ]] || continue
+      echo "==> The last lines of ${log##*/}" >&2
+      tail -n 20 "${log}" >&2
+    done
+  fi
+  for pid in "${pids[@]}"; do kill -INT "${pid}" 2>/dev/null || true; done
+  wait 2>/dev/null || true
+  rm -rf -- "${run:?}"
+}
+trap stop_stack EXIT
+
+base64url() {
+  basenc --base64url --wrap=0 | tr -d '='
+}
+
+sign_jwt() {
+  local header payload signature
+  header="$(printf '{"alg":"HS256","typ":"JWT"}' | base64url)"
+  payload="$(printf '{"iss":"supabase-demo","role":"%s","exp":1983812996}' "$1" | base64url)"
+  signature="$(printf '%s.%s' "${header}" "${payload}" | openssl dgst -sha256 -hmac "${jwt_secret}" -binary | base64url)"
+  echo "${header}.${payload}.${signature}"
+}
+
+report() {
+  echo "$1 after $(((${EPOCHREALTIME/./} - started) / 1000)) ms."
+}
+
+free_port() {
+  local port
+  while :; do
+    port=$((20000 + RANDOM % 40000))
+    if ! (: <"/dev/tcp/127.0.0.1/${port}") 2>/dev/null; then
+      echo "${port}"
+      return
+    fi
+  done
+}
+
+wait_for() {
+  local name="$1" log="$2" attempt
+  shift 2
+  for ((attempt = 0; attempt < 600; attempt++)); do
+    if "$@" >/dev/null 2>&1; then return; fi
+    sleep 0.1
+  done
+  echo "check-stack: ${name} did not start. Its log follows." >&2
+  tail -n 40 "${log}" >&2
+  return 1
+}
+
+extract() {
+  local reference="$1" directory="$2"
+  [[ -f "${directory}/.complete" ]] && return
+  if [[ -e "${directory}.partial" ]]; then
+    chmod -R u+w "${directory}.partial"
+    rm -rf -- "${directory:?}.partial"
+  fi
+  mkdir -p "${directory}.partial"
+  "${cache}/crane-${crane_version}/crane" export --platform linux/amd64 "${reference}" - |
+    tar -x -C "${directory}.partial" --no-same-owner --exclude='dev/*'
+  chmod -R u+w "${directory}.partial"
+  touch "${directory}.partial/.complete"
+  mv "${directory}.partial" "${directory}"
+}
+
+relocate_store() {
+  local store="$1/nix/store"
+  [[ -f "$1/.relocated" ]] && return
+  find "${store}" -type l -lname '/nix/store/*' -printf '%l\0%p\0' |
+    perl -0 -ne 'chomp; push @pair, $_; next if @pair < 2; my ($target, $link) = @pair; @pair = ();
+      $target =~ s{^/nix/store/}{/tmp/nixst/}; unlink $link or die "$link: $!"; symlink $target, $link or die "$link: $!";'
+  grep -rlZF '/nix/store/' "${store}" | xargs -0 -r -n 200 perl -0777 -pi -e 's{/nix/store/}{/tmp/nixst/}g'
+  touch "$1/.relocated"
+}
+
+bundle_main_service() {
+  local directory="${cache}/main-${cli_version}" source file
+  [[ -f "${directory}/index.ts" ]] && return
+  source="${directory}.partial"
+  rm -rf -- "${source:?}"
+  mkdir -p "${source}"
+  for file in serve.main.ts serve-main-deps.ts; do
+    curl -fsSL -o "${source}/${file}" \
+      "https://raw.githubusercontent.com/supabase/cli/${cli_version}/apps/cli/src/shared/functions/${file}"
+  done
+  printf '%s  %s\n' "${serve_main_sha256}" "${source}/serve.main.ts" "${serve_main_deps_sha256}" \
+    "${source}/serve-main-deps.ts" | sha256sum --check --quiet
+  printf '{"imports": {"effect": "npm:effect@4.0.2", "jose": "npm:jose@6.2.10"}}\n' >"${source}/deno.json"
+  (cd "${source}" && "${deno}" bundle --quiet --platform=browser --minify --config=deno.json \
+    --output=index.ts serve.main.ts)
+  mkdir -p "${directory}"
+  mv "${source}/index.ts" "${directory}/index.ts"
+  rm -rf -- "${source:?}"
+}
+
+fill_cache() {
+  mkdir -p "${cache}"
+  exec {lock}>"${cache}/lock"
+  flock "${lock}"
+  if [[ ! -x "${cache}/crane-${crane_version}/crane" ]]; then
+    GOBIN="${cache}/crane-${crane_version}" go install "github.com/google/go-containerregistry/cmd/crane@${crane_version}"
+  fi
+  extract "${postgres_image}@${postgres_digest}" "${cache}/${postgres_digest}"
+  relocate_store "${cache}/${postgres_digest}"
+  extract "${edge_runtime_image}@${edge_runtime_digest}" "${cache}/${edge_runtime_digest}"
+  extract "${postgrest_image}@${postgrest_digest}" "${cache}/${postgrest_digest}"
+  bundle_main_service
+  ln -sfn "${cache}/${postgres_digest}/nix/store" "${store_link}"
+  flock --unlock "${lock}"
+}
+
+profile_bin() {
+  local root="$1" path="/nix/var/nix/profiles/default" target
+  while :; do
+    case "${path}" in
+      "${store_link}"/*) path="${root}/nix/store/${path#"${store_link}"/}" ;;
+      /nix/*) path="${root}${path}" ;;
+      *) ;;
+    esac
+    [[ -L "${path}" ]] || break
+    target="$(readlink "${path}")"
+    [[ "${target}" == /* ]] || target="$(dirname "${path}")/${target}"
+    path="${target}"
+  done
+  echo "${path}/bin"
+}
+
+start_postgres() {
+  local root="${cache}/${postgres_digest}" bin config="${run}/etc" file psql
+  bin="$(profile_bin "${root}")"
+  mkdir -p "${config}" "${run}/socket"
+  printf '%s\n' "${password}" >"${run}/password"
+  env LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 LOCALE_ARCHIVE="${bin}/../lib/locale/locale-archive" \
+    "${bin}/initdb" -D "${run}/data" --username=supabase_admin --pwfile="${run}/password" --allow-group-access \
+    --locale-provider=icu --encoding=UTF-8 --icu-locale=en_US.UTF-8 >"${run}/initdb.log" 2>&1
+  cp -r "${root}/etc/postgresql" "${root}/etc/postgresql-custom" "${config}/"
+  openssl rand -hex 32 >"${config}/postgresql-custom/pgsodium_root.key"
+  cp "${root}/usr/lib/postgresql/bin/pgsodium_getkey.sh" "${run}/pgsodium_getkey.sh"
+  find "${config}" "${run}/pgsodium_getkey.sh" -type f -exec sed -i \
+    -e "s#/usr/lib/postgresql/bin/pgsodium_getkey.sh#${run}/pgsodium_getkey.sh#g" \
+    -e "s#/etc/postgresql#${config}/postgresql#g" -e "s#/var/lib/postgresql/data#${run}/data#g" \
+    -e "s#/var/run/postgresql#${run}/socket#g" {} +
+  env LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 LOCALE_ARCHIVE="${bin}/../lib/locale/locale-archive" \
+    "${bin}/postgres" -D "${config}/postgresql" -c port="${db_port}" -c listen_addresses=127.0.0.1 \
+    >"${run}/postgres.log" 2>&1 &
+  pids+=("$!")
+  wait_for postgres "${run}/postgres.log" "${bin}/pg_isready" -q -h 127.0.0.1 -p "${db_port}" -U supabase_admin
+  PATH="${bin}:${PATH}" PGHOST=127.0.0.1 POSTGRES_PORT="${db_port}" POSTGRES_PASSWORD="${password}" \
+    bash "${root}/docker-entrypoint-initdb.d/migrate.sh" >"${run}/migrate.log" 2>&1 || {
+    tail -n 40 "${run}/migrate.log" >&2
+    return 1
+  }
+  psql=("${bin}/psql" -X -q -v ON_ERROR_STOP=1 "postgresql://supabase_admin:${password}@127.0.0.1:${db_port}/postgres")
+  "${psql[@]}" -c "alter user postgres with password '${password}'" \
+    -c "alter user authenticator with password '${password}'"
+  psql[-1]="postgresql://postgres:${password}@127.0.0.1:${db_port}/postgres"
+  "${psql[@]}" -v value="${XQUIK_API_KEY}" <<<"select vault.create_secret(:'value', 'xquik_api_key');" >/dev/null
+  for file in supabase/migrations/*.sql; do
+    "${psql[@]}" -f "${file}" >/dev/null
+  done
+}
+
+start_postgrest() {
+  env -i PGRST_DB_URI="postgresql://authenticator:${password}@127.0.0.1:${db_port}/postgres" \
+    PGRST_DB_SCHEMAS=public,graphql_public PGRST_DB_EXTRA_SEARCH_PATH=public,extensions PGRST_DB_MAX_ROWS=1000 \
+    PGRST_DB_ANON_ROLE=anon PGRST_JWT_SECRET="${jwt_secret}" PGRST_SERVER_HOST=127.0.0.1 \
+    PGRST_SERVER_PORT="${rest_port}" PGRST_ADMIN_SERVER_PORT="${rest_admin_port}" \
+    "${cache}/${postgrest_digest}/bin/postgrest" >"${run}/postgrest.log" 2>&1 &
+  pids+=("$!")
+  wait_for PostgREST "${run}/postgrest.log" curl -fsS "http://127.0.0.1:${rest_admin_port}/ready"
+}
+
+start_gateway() {
+  local config
+  config="$(jq -cn --argjson port "${api_port}" \
+    --arg rest "http://127.0.0.1:${rest_port}/" --arg functions "http://127.0.0.1:${functions_port}/" \
+    --arg secret "${secret_key}" --arg publishable "${publishable_key}" --arg service "${service_role_key}" \
+    --arg anon "${anon_key}" '{port: $port, routes: [
+      {prefix: "/rest/v1/", upstream: $rest, header: "authorization"},
+      {prefix: "/functions/v1/", upstream: $functions, header: "sb-api-key"}],
+      keys: {secret: $secret, publishable: $publishable, serviceRole: $service, anon: $anon}}')"
+  "${deno}" run --allow-net tests/stack/gateway.ts "${config}" >"${run}/gateway.log" 2>&1 &
+  pids+=("$!")
+  wait_for gateway "${run}/gateway.log" curl -sS -o /dev/null "http://127.0.0.1:${api_port}/"
+}
+
+start_edge_runtime() {
+  local verify_jwt functions secret jwks
+  verify_jwt="$(sed -n '/^\[functions.xquik-webhook\]/,/^\[/s/^verify_jwt = //p' supabase/config.toml)"
+  functions="$(jq -cn --argjson verify "${verify_jwt}" '{"xquik-webhook": {
+    entrypointPath: "supabase/functions/xquik-webhook/index.ts",
+    importMapPath: "supabase/functions/xquik-webhook/deno.json",
+    verifyJWT: $verify}}')"
+  secret="$(printf '%s' "${jwt_secret}" | base64url)"
+  jwks="$(jq -cn --arg k "${secret}" '{keys: [{kty: "oct", k: $k}]}')"
+  env -i PATH=/usr/bin:/bin HOME="${HOME}" DENO_DIR="${cache}/deno" \
+    XQUIK_API_KEY="${XQUIK_API_KEY}" XQUIK_WEBHOOK_SECRET="${XQUIK_WEBHOOK_SECRET}" \
+    SUPABASE_URL="http://127.0.0.1:${api_port}" SUPABASE_ANON_KEY="${anon_key}" \
+    SUPABASE_SERVICE_ROLE_KEY="${service_role_key}" \
+    SUPABASE_DB_URL="postgresql://postgres:${password}@127.0.0.1:${db_port}/postgres" \
+    SUPABASE_INTERNAL_PUBLISHABLE_KEY="${publishable_key}" SUPABASE_INTERNAL_SECRET_KEY="${secret_key}" \
+    SUPABASE_INTERNAL_JWT_SECRET="${jwt_secret}" SUPABASE_JWKS="${jwks}" SUPABASE_INTERNAL_HOST_PORT="${api_port}" \
+    SUPABASE_INTERNAL_FUNCTIONS_CONFIG="${functions}" \
+    "${cache}/${edge_runtime_digest}/usr/local/bin/edge-runtime" start --main-service="${cache}/main-${cli_version}" \
+    --port="${functions_port}" --policy=per_worker >"${run}/edge-runtime.log" 2>&1 &
+  pids+=("$!")
+  wait_for "the edge runtime" "${run}/edge-runtime.log" curl -sS -o /dev/null "http://127.0.0.1:${functions_port}/"
+}
+
+started="${EPOCHREALTIME/./}"
+fill_cache
+report "Cache ready"
+db_port="$(free_port)"
+rest_port="$(free_port)"
+rest_admin_port="$(free_port)"
+functions_port="$(free_port)"
+api_port="$(free_port)"
+jwt_secret="$(openssl rand -hex 32)"
+anon_key="$(sign_jwt anon)"
+service_role_key="$(sign_jwt service_role)"
+publishable_key="sb_publishable_$(openssl rand -hex 16)"
+secret_key="sb_secret_$(openssl rand -hex 16)"
+XQUIK_API_KEY="xq_stack_test_$(openssl rand -hex 16)"
+XQUIK_WEBHOOK_SECRET="$(openssl rand -hex 32)"
+start_postgres
+report "Postgres and the migrations ready"
+start_postgrest
+start_gateway
+start_edge_runtime
+report "Stack ready"
+DB_URL="postgresql://postgres:${password}@127.0.0.1:${db_port}/postgres" \
+  FUNCTIONS_URL="http://127.0.0.1:${api_port}/functions/v1" XQUIK_STACK_HOST=127.0.0.1 \
+  XQUIK_WEBHOOK_SECRET="${XQUIK_WEBHOOK_SECRET}" NO_COLOR=1 \
+  "${deno}" test --allow-all tests/stack/ 2>&1 | tee "${run}/stack.log"
+totals="$(grep -E '^ok \| ' "${run}/stack.log" | tail -n 1)"
+[[ "${totals}" != *" ignored"* ]] || {
+  printf 'The stack run ignored a test or a step, so it did not run every test.\n%s\n' "${totals}" >&2
+  exit 1
+}
+report "Stack test passed"
