@@ -245,7 +245,7 @@ passed+=("${tests_passed:+${tests_passed} }tests at 100% coverage")
 run_check "CodeQL" "Static analysis with the CodeQL security-extended queries" \
   "Fix the CodeQL findings above, then rerun." run_codeql
 
-mutation_minimum="76.43"
+mutation_minimum="81.34"
 
 mutation_tests() {
   local listing files=()
