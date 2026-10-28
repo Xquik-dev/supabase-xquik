@@ -126,14 +126,14 @@ export function mutantsOf(file: string, text: string): Mutant[] {
   return file.endsWith(".sql") ? sqlMutants(file, text) : typescriptMutants(file, text);
 }
 
-async function copyTree(from: string, to: string): Promise<void> {
-  await Deno.mkdir(to, { recursive: true });
-  for await (const entry of Deno.readDir(from)) {
+function copyTree(from: string, to: string): void {
+  Deno.mkdirSync(to, { recursive: true });
+  for (const entry of Deno.readDirSync(from)) {
     const source = `${from}/${entry.name}`;
     const target = `${to}/${entry.name}`;
-    if (entry.name === "node_modules") await Deno.symlink(source, target);
-    else if (entry.isDirectory && entry.name !== ".git") await copyTree(source, target);
-    else if (entry.isFile) await Deno.copyFile(source, target);
+    if (entry.name === "node_modules") Deno.symlinkSync(source, target);
+    else if (entry.isDirectory && entry.name !== ".git") copyTree(source, target);
+    else if (entry.isFile) Deno.copyFileSync(source, target);
   }
 }
 
@@ -202,7 +202,7 @@ export async function runMutants(
   const scratch = await Deno.realPath(await Deno.makeTempDir({ prefix: "xquik-mutation-" }));
   try {
     const copies = await Promise.all(Array.from({ length: Math.max(1, workers) }, async (_, index) => {
-      await copyTree(root, `${scratch}/${index}`);
+      copyTree(root, `${scratch}/${index}`);
       await Deno.mkdir(`${scratch}/${index}.tmp`);
       return `${scratch}/${index}`;
     }));
