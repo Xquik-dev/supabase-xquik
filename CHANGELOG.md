@@ -2,8 +2,6 @@
 
 ## Unreleased
 
-- Fail the checks when a change edits, renames or deletes a migration that is on
-  `main`.
 - Add the Supabase project with the Xquik operation registry, SQL functions and
   cron jobs.
 - Add the `xquik-webhook` Edge Function that checks signatures and stores each
@@ -25,3 +23,5 @@
   functions drops below a minimum.
 - Add fast-check property tests for the webhook signature check, the secret
   list, the `askDocs` answers and the SQL quoting.
+- Fail the checks when a change edits, renames, retypes or deletes a migration
+  that is on `main`.
