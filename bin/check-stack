@@ -138,7 +138,7 @@ fill_cache() {
   extract "${edge_runtime_image}@${edge_runtime_digest}" "${cache}/${edge_runtime_digest}"
   extract "${postgrest_image}@${postgrest_digest}" "${cache}/${postgrest_digest}"
   bundle_main_service
-  ln -sfn "${postgres_dir}/nix/store" "${store_link}"
+  bin/own-link "${postgres_dir}/nix/store" "${store_link}"
   flock --unlock "${lock}"
 }
 
