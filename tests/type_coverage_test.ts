@@ -12,7 +12,7 @@ export const parsed = Promise.resolve(JSON.parse("1"));
 export const maybe: string | Promise<unknown> = parsed;
 `;
 
-const PROMISES = `export async function settle(maybe?: Promise<number>): Promise<number> {
+const PROMISES = `export async function settle(maybe?: Promise<number>, pair?: [Promise<1>, 2]): Promise<number> {
   Promise.resolve(1);
   await Promise.resolve(2);
   void Promise.resolve(3);
@@ -20,6 +20,9 @@ const PROMISES = `export async function settle(maybe?: Promise<number>): Promise
   Promise.resolve(4).then(() => 5);
   ({ then: 7 });
   ({ then: (): number => 8 });
+  [1, 2].map(async (n) => n);
+  [1, 2].map((n) => n);
+  pair;
   return 9;
 }
 `;
@@ -51,18 +54,21 @@ Deno.test("reports each value whose type holds any, in a union member or a type 
   ]);
 });
 
-Deno.test("reports each statement that leaves a promise or another thenable unawaited", async () => {
+Deno.test("reports each statement that leaves a thenable, a voided thenable or an array of them unawaited", async () => {
   const root = await project({ "promises.ts": PROMISES });
   const report = await typeCoverage(root, ["promises.ts"]);
   assertEquals(report.floating.map(({ file, line, column, text }) => `${file}:${line}:${column} ${text}`), [
     "promises.ts:2:3 Promise.resolve(1)",
+    "promises.ts:4:3 void Promise.resolve(3)",
     "promises.ts:5:3 maybe",
     "promises.ts:6:3 Promise.resolve(4).then(() => 5)",
     "promises.ts:8:3 ({ then: (): number => 8 })",
+    "promises.ts:9:3 [1, 2].map(async (n) => n)",
+    "promises.ts:11:3 pair",
   ]);
   assertEquals(
     summary(report).split("\n").at(-1),
-    "4 of 7 expression statements leave a promise that no code awaits.",
+    "7 of 10 expression statements leave a promise that no code awaits.",
   );
 });
 
@@ -107,7 +113,7 @@ Deno.test("the command exits 1 and lists the sites only when a value has any or 
   const floating = await run("promises.ts");
   assertEquals([floating.code, floating.lines.at(-1)], [
     1,
-    "4 of 7 expression statements leave a promise that no code awaits.",
+    "7 of 10 expression statements leave a promise that no code awaits.",
   ]);
   const clean = await run("fine.ts");
   assertEquals(clean, {
