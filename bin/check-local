@@ -195,7 +195,7 @@ run_codeql() {
     BEGIN { count = split(extracted, names, "\n"); for (i = 1; i <= count; i++) read[names[i]] = 1 }
     !($0 in read)' <<<"${tracked}")" || return
   [[ -z "${skipped}" ]] || {
-    printf 'CodeQL did not extract these files, so the scan cannot vouch for them.\n%s\n' "${skipped}" >&2
+    printf 'CodeQL did not extract these files, so the scan did not check them.\n%s\n' "${skipped}" >&2
     return 1
   }
   count="$(jq '[.runs[].results[]?] | length' "${results}")" || return
