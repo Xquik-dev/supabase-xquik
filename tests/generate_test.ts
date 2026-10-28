@@ -1,4 +1,4 @@
-import { assertEquals, assertMatch, assertNotEquals, assertThrows } from "@std/assert";
+import { assertEquals, assertMatch, assertNotEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import { z } from "zod";
 import { foreignTables, renderForeignTables } from "../scripts/foreign_tables.ts";
 import { latestMigration, operationRows, REGISTRY_SUFFIX, renderMigration, SPEC_PATH } from "../scripts/generate.ts";
@@ -93,4 +93,27 @@ Deno.test("deno task generate writes each migration once under its own stamp & r
   assertEquals(await Deno.readTextFile(`${dir}/${foreign.file}`), renderForeignTables(tables));
   assertEquals(await generate(), [{ ...registry, changed: false }, { ...foreign, changed: false }]);
   await Deno.remove(dir, { recursive: true });
+});
+
+Deno.test("deno task generate stops when it cannot read the migrations, so it writes no duplicate", () => {
+  const root = Deno.makeTempDirSync();
+  const latest = latestMigration(REGISTRY_SUFFIX);
+  Deno.mkdirSync(`${root}/supabase/migrations`, { recursive: true });
+  Deno.copyFileSync(SPEC_PATH, `${root}/${SPEC_PATH}`);
+  Deno.copyFileSync(latest, `${root}/${latest}`);
+  const output = new Deno.Command(Deno.execPath(), {
+    args: [
+      "run",
+      "--config",
+      new URL("../deno.json", import.meta.url).pathname,
+      "--allow-read=openapi.json",
+      "--allow-write=supabase/migrations",
+      new URL("../scripts/generate.ts", import.meta.url).pathname,
+    ],
+    cwd: root,
+  }).outputSync();
+  assertEquals(output.code, 1);
+  assertStringIncludes(new TextDecoder().decode(output.stderr), 'Requires read access to "supabase/migrations"');
+  const names = Deno.readDirSync(`${root}/supabase/migrations`).map((entry) => `supabase/migrations/${entry.name}`);
+  assertEquals(names.toArray(), [latest]);
 });

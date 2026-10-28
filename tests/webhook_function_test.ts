@@ -5,6 +5,10 @@ const FUNCTION = new URL("../supabase/functions/xquik-webhook/index.ts", import.
 const SERVICE_ROLE_KEY = "service-role-key";
 const STORE_DOWN = "store-down";
 const BARE_EVENT = { eventType: "tweet.new", streamEventId: "9002", occurredAt: "2026-10-28T19:00:00Z" };
+const CONNECTION: Deno.ServeHandlerInfo = {
+  remoteAddr: { transport: "tcp", hostname: "127.0.0.1", port: 0 },
+  completed: Promise.resolve(),
+};
 
 type Handler = (request: Request) => Promise<Response>;
 type Received = { readonly table: string; readonly apiKey: string | null; readonly body: unknown };
@@ -12,10 +16,6 @@ type Postgrest = { readonly url: string; readonly received: Received[]; readonly
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
-}
-
-function isHandler(value: unknown): value is Handler {
-  return typeof value === "function";
 }
 
 function fakePostgrest(): Postgrest {
@@ -42,7 +42,7 @@ function fakePostgrest(): Postgrest {
 
 async function loadFunction(supabaseUrl: string, waits: Promise<unknown>[]): Promise<Handler> {
   const serve = Deno.serve;
-  let handler: unknown;
+  const served: Deno.ServeHandler[] = [];
   Deno.env.set("XQUIK_WEBHOOK_SECRET", SECRET);
   Deno.env.set("SUPABASE_URL", supabaseUrl);
   Deno.env.set("SUPABASE_SERVICE_ROLE_KEY", SERVICE_ROLE_KEY);
@@ -50,14 +50,18 @@ async function loadFunction(supabaseUrl: string, waits: Promise<unknown>[]): Pro
     value: { waitUntil: (promise: Promise<unknown>) => waits.push(promise) },
     configurable: true,
   });
-  Object.defineProperty(Deno, "serve", { value: (served: unknown) => (handler = served), configurable: true });
+  Object.defineProperty(Deno, "serve", {
+    value: (handler: Deno.ServeHandler) => served.push(handler),
+    configurable: true,
+  });
   try {
     await import("../supabase/functions/xquik-webhook/index.ts");
   } finally {
     Object.defineProperty(Deno, "serve", { value: serve, configurable: true });
   }
-  assert(isHandler(handler), "the function passes a handler to Deno.serve");
-  return handler;
+  const [handler] = served;
+  assert(handler !== undefined, "the function passes a handler to Deno.serve");
+  return async (request) => await handler(request, CONNECTION);
 }
 
 async function signedPost(body: unknown, nonce = randomNonce()): Promise<Request> {
