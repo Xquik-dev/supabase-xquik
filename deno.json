@@ -7,7 +7,7 @@
     "test:stack": "deno test --allow-all tests/stack/",
     "type-coverage": "git ls-files --cached --others --exclude-standard -- '*.ts' | xargs deno run --allow-read --allow-run --allow-env scripts/type_coverage.ts",
     "generate": "deno run --allow-read=openapi.json,supabase/migrations --allow-write=supabase/migrations scripts/generate.ts",
-    "types": "node_modules/.bin/supabase gen types typescript --local --schema public > supabase/functions/_shared/database.types.ts && deno fmt supabase/functions/_shared/database.types.ts"
+    "types": "node_modules/.bin/supabase gen types typescript --local --schema public > supabase/functions/_shared/database.types.ts && deno fmt supabase/functions/_shared/database.types.ts && deno run --allow-read=supabase/functions/_shared/database.types.ts --allow-write=supabase/functions/_shared/database.types.ts scripts/types.ts supabase/functions/_shared/database.types.ts && deno fmt supabase/functions/_shared/database.types.ts"
   },
   "imports": {
     "@std/assert": "jsr:@std/assert@1",

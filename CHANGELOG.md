@@ -19,3 +19,4 @@
 - Fail the checks on a secret anywhere in the git history or a broken Markdown
   link. Fail them on prose that breaks the `.vale` styles, a complex function or
   duplicated code.
+- Fail the checks on any oxlint finding, type-aware rules included.

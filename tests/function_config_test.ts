@@ -20,7 +20,7 @@ async function bareImports(entry: string): Promise<string[]> {
     .filter((module) => module.specifier.startsWith("file:"))
     .flatMap((module) => module.dependencies.map((dependency) => dependency.specifier))
     .filter((specifier) => !specifier.startsWith("."));
-  return [...new Set(specifiers)].sort();
+  return [...new Set(specifiers)].toSorted();
 }
 
 const root = denoConfig.parse(JSON.parse(Deno.readTextFileSync("deno.json")));

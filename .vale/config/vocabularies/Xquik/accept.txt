@@ -5,6 +5,7 @@ gitleaks
 jq
 nonces
 npm
+oxlint
 Packagist
 pg_cron
 pg_net

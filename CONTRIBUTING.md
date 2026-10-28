@@ -19,13 +19,14 @@ bin/check-local
 9. REUSE 6.2.0 checks that every file has a license and a copyright. `REUSE.toml` gives them to each file without an SPDX header.
 10. `deno fmt --check` checks the format.
 11. `deno lint` runs every rule that applies, plus the `lint/strict.ts` plugin. The plugin bans each type assertion except `as const`, and each comment that has no `https` link.
-12. fallow fails on any function over the limits in `.fallowrc.json`. It also fails on duplicated code, including clones between TypeScript and JavaScript.
-13. `deno check` checks the types with the strict compiler options in `deno.json`.
-14. `scripts/type_coverage.ts` fails when the type of any value contains `any`. It also fails when a statement leaves a promise, a voided promise or an array of promises that no code awaits.
-15. squawk assumes a transaction, except in a file with `create index concurrently`. `supabase migration up` runs that statement alone.
-16. `deno audit` and `bun audit` check `deno.lock` and `bun.lock` for known vulnerabilities.
-17. Every test must run and pass, with no ignored test or step. The tests must run every line, branch and function of every tracked TypeScript source file, and the coverage report must measure no other file. The SQL tests apply the migrations with `supabase migration up`. They fail on any Supabase advisor finding at any level, and when `supabase gen types` would change `supabase/functions/_shared/database.types.ts`.
-18. CodeQL runs its security-extended queries over the tracked files.
+12. oxlint runs every correctness and suspicious rule of the 8 plugins in `.oxlintrc.json`, plus every type-aware rule except `prefer-readonly-parameter-types` and `require-await`. It reads the types through the import map, `deno.lock` and the types that `deno types` prints.
+13. fallow fails on any function over the limits in `.fallowrc.json`. It also fails on duplicated code, including clones between TypeScript and JavaScript.
+14. `deno check` checks the types with the strict compiler options in `deno.json`.
+15. `scripts/type_coverage.ts` fails when the type of any value contains `any`. It also fails when a statement leaves a promise, a voided promise or an array of promises that no code awaits.
+16. squawk assumes a transaction, except in a file with `create index concurrently`. `supabase migration up` runs that statement alone.
+17. `deno audit` and `bun audit` check `deno.lock` and `bun.lock` for known vulnerabilities.
+18. Every test must run and pass, with no ignored test or step. The tests must run every line, branch and function of every tracked TypeScript source file, and the coverage report must measure no other file. The SQL tests apply the migrations with `supabase migration up`. They fail on any Supabase advisor finding at any level, and when `deno task types` would change `supabase/functions/_shared/database.types.ts`.
+19. CodeQL runs its security-extended queries over the tracked files.
 
 Fix what a check finds. Never suppress a finding or narrow a check.
 

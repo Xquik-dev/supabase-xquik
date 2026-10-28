@@ -88,8 +88,8 @@ Deno.test("deno task generate writes each migration once under its own stamp & r
   assertMatch(registry.file, /^supabase\/migrations\/\d{14}_xquik_operations\.sql$/);
   assertMatch(foreign.file, /^supabase\/migrations\/\d{14}_xquik_foreign_tables\.sql$/);
   assertNotEquals(
-    registry.file.match(/\d{14}/)?.[0],
-    foreign.file.match(/\d{14}/)?.[0],
+    /\d{14}/.exec(registry.file)?.[0],
+    /\d{14}/.exec(foreign.file)?.[0],
     "Supabase keys each migration by its stamp, so 2 migrations in 1 run need 2 stamps",
   );
   assertEquals(await Deno.readTextFile(`${dir}/${registry.file}`), renderMigration(rows));

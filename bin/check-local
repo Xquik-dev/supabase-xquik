@@ -294,6 +294,40 @@ lint_code_health() {
 }
 
 
+lint_type_aware() {
+  local source="${workspace}/oxlint-source" listing files=() files_json
+  listing="$(git ls-files --cached --others --exclude-standard -- '*.ts')" || return
+  mapfile -t files <<<"${listing}"
+  files_json="$(jq -nR '[inputs]' <<<"${listing}")" || return
+  mkdir "${source}" &&
+    git ls-files -z --cached --others --exclude-standard | tar --null -T - -cf - | tar -xf - -C "${source}" || return
+  (
+    cd "${source}" || exit
+    "${root}/${deno}" install --vendor --frozen --quiet || exit
+    "${root}/${deno}" types >deno.d.ts || exit
+    local found meta metas=()
+    found="$(find vendor/jsr.io -name '*_meta.json')" || exit
+    while IFS= read -r meta; do metas+=(--slurpfile "${meta}" "${meta}"); done <<<"${found}"
+    jq -n --slurpfile config deno.json --slurpfile lock deno.lock --argjson files "${files_json}" "${metas[@]}" '
+      $ARGS.named as $metas
+      | [ $lock[0].specifiers | to_entries[] | select(.key | startswith("jsr:"))
+          | (.key | capture("^jsr:(?<name>@[^/@]+/[^/@]+)@").name) as $name
+          | { specifier: .key, root: "./vendor/jsr.io/\($name)/\(.value)/",
+              exports: $metas["vendor/jsr.io/\($name)/\(.value)_meta.json"][0].exports } ] as $packages
+      | [ $config[0].imports | to_entries[] | select(.value | startswith("jsr:")) ] as $aliases
+      | [ $packages[] as $package
+          | ([$package.specifier] + [$aliases[] | select(.value == $package.specifier) | .key])[] as $prefix
+          | $package.exports | to_entries[]
+          | { key: ($prefix + (.key | ltrimstr("."))), value: [$package.root + (.value | ltrimstr("./"))] } ] as $paths
+      | { compilerOptions: ($config[0].compilerOptions + { target: "esnext", module: "preserve",
+            moduleResolution: "bundler", lib: ["esnext"], noEmit: true, allowImportingTsExtensions: true,
+            paths: ($paths | from_entries) }),
+          files: (["deno.d.ts"] + $files) }' >tsconfig.json || exit
+    OXLINT_TSGOLINT_PATH="${root}/node_modules/.bin/tsgolint" "${root}/node_modules/.bin/oxlint" \
+      --type-aware --type-check --format=unix "${files[@]}"
+  )
+}
+
 run_check "bans" "Suppression and exclusion ban" \
   "Remove each suppression or exclusion listed above and fix what it hid." no_banned_patterns
 run_check "deno.json keys" "Exclusion keys in deno.json" "Remove the keys listed above." no_config_exclusions
@@ -311,6 +345,8 @@ run_check "REUSE" "Licensing with REUSE lint" \
   uv tool run --from "reuse==${reuse_version}" reuse lint
 run_check "format" "Format check" "Run ${deno} fmt, then rerun." "${deno}" fmt --check
 run_check "lint" "Lint" "Fix the lint findings above." "${deno}" lint
+run_check "oxlint" "Type-aware lint with oxlint and tsgolint" \
+  "Fix the oxlint findings and type errors above." lint_type_aware
 run_check "fallow" "Complexity and duplication with fallow" \
   "Split each function or merge each clone listed above." lint_code_health
 run_check "types" "Type check" "Fix the type errors above." "${deno}" check

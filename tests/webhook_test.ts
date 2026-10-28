@@ -1,5 +1,10 @@
 import { assertEquals, assertFalse, assertThrows } from "@std/assert";
-import { handleDelivery, parseSecrets, verifyDelivery } from "../supabase/functions/_shared/webhook.ts";
+import {
+  type DeliveryStore,
+  handleDelivery,
+  parseSecrets,
+  verifyDelivery,
+} from "../supabase/functions/_shared/webhook.ts";
 import {
   memoryStore,
   NOW,
@@ -126,7 +131,7 @@ Deno.test("rejects a delivery without its timestamp, nonce or signature header",
   const reasons = await Promise.all(headers.map(async (header) => {
     const signed = await signDelivery(EVENT);
     signed.headers.delete(header);
-    return reason(signed);
+    return await reason(signed);
   }));
   assertEquals(reasons, ["stale", "signature", "signature"]);
 });
@@ -141,7 +146,7 @@ Deno.test("accepts deliveries signed with any configured secret", async () => {
   const secrets = parseSecrets(`${SECRET}, second-webhook-secret`);
   const { events, store } = memoryStore();
   for (const [index, secret] of secrets.entries()) {
-    const body = JSON.stringify(sampleEvent("tweet.new", { streamEventId: `90${index}` }));
+    const body = JSON.stringify(sampleEvent("tweet.new", { streamEventId: `90${String(index)}` }));
     assertEquals(
       (await handleDelivery(post(await signDelivery(body, { secret })), receiver(store, secrets).deps)).status,
       200,
@@ -152,8 +157,14 @@ Deno.test("accepts deliveries signed with any configured secret", async () => {
 
 Deno.test("answers 503 when the store fails", async () => {
   const failing = [
-    { claimNonce: () => Promise.reject(new Error("down")), saveEvent: () => Promise.resolve("new" as const) },
-    { claimNonce: () => Promise.resolve("new" as const), saveEvent: () => Promise.reject(new Error("down")) },
+    {
+      claimNonce: async () => await Promise.reject(new Error("down")),
+      saveEvent: async () => await Promise.resolve("new" as const),
+    },
+    {
+      claimNonce: async () => await Promise.resolve("new" as const),
+      saveEvent: async () => await Promise.reject(new Error("down")),
+    },
   ];
   for (const store of failing) {
     assertEquals((await handleDelivery(post(await signDelivery(EVENT)), receiver(store).deps)).status, 503);
@@ -179,9 +190,12 @@ Deno.test("never puts the secret or the signature in a response", async () => {
     post(await signDelivery("not json")),
     new Request(RECEIVER_URL),
   ];
-  const failing = { claimNonce: () => Promise.reject(new Error(SECRET)), saveEvent: store.saveEvent };
+  const failing: DeliveryStore = {
+    claimNonce: async () => await Promise.reject(new Error(SECRET)),
+    saveEvent: async (event) => await store.saveEvent(event),
+  };
   const responses = await Promise.all([
-    ...requests.map((request) => handleDelivery(request, receiver(store).deps)),
+    ...requests.map(async (request) => await handleDelivery(request, receiver(store).deps)),
     handleDelivery(post(await signDelivery(EVENT)), receiver(failing).deps),
   ]);
   assertEquals(new Set(responses.map((response) => response.status)), new Set([200, 401, 405, 503]));

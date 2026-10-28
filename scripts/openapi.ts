@@ -133,5 +133,5 @@ export function publicOperations(root: unknown): Operation[] {
         listField: json === undefined ? null : firstRequiredArrayProperty(root, json.schema),
       }];
     })
-  ).sort((a, b) => (a.operationId < b.operationId ? -1 : 1));
+  ).toSorted((a, b) => (a.operationId < b.operationId ? -1 : 1));
 }

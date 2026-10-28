@@ -29,7 +29,7 @@ function fakePostgrest(): Postgrest {
     const isNonce = table === "xquik_webhook_nonces";
     const key = isNonce ? row["nonce"] : row["stream_event_id"];
     if (key === STORE_DOWN) return Response.json({ code: "XX000", message: "The store is down." }, { status: 500 });
-    const seen = isNonce ? keys["xquik_webhook_nonces"] : keys["xquik_events"];
+    const seen = isNonce ? keys.xquik_webhook_nonces : keys.xquik_events;
     const isNew = !seen.has(key);
     seen.add(key);
     if (!isNonce) return Response.json(isNew ? [{ stream_event_id: key }] : [], { status: 201 });
@@ -37,7 +37,7 @@ function fakePostgrest(): Postgrest {
       ? new Response(null, { status: 201 })
       : Response.json({ code: "23505", message: "duplicate key value" }, { status: 409 });
   });
-  return { url: `http://127.0.0.1:${server.addr.port}`, received, server };
+  return { url: `http://127.0.0.1:${String(server.addr.port)}`, received, server };
 }
 
 async function loadFunction(supabaseUrl: string, waits: Promise<unknown>[]): Promise<Handler> {
