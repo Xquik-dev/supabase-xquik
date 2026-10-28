@@ -1,4 +1,4 @@
-import { assertEquals, assertMatch, assertThrows } from "@std/assert";
+import { assertEquals, assertMatch, assertStringIncludes, assertThrows } from "@std/assert";
 import { z } from "zod";
 import { latestRegistryMigration, operationRows, renderMigration, SPEC_PATH } from "../scripts/generate.ts";
 
@@ -63,4 +63,43 @@ Deno.test("deno task generate writes a migration once and reuses it while openap
   assertMatch(first.file, /^supabase\/migrations\/\d{14}_xquik_operations\.sql$/);
   assertEquals(await Deno.readTextFile(`${root}/${first.file}`), renderMigration(rows));
   assertEquals(await generate(), { ...first, changed: false });
+});
+
+Deno.test("deno task generate stops when it cannot read the migrations, so it writes no duplicate", async () => {
+  const root = await Deno.makeTempDir();
+  const latest = latestRegistryMigration();
+  await Deno.mkdir(`${root}/supabase/migrations`, { recursive: true });
+  await Deno.copyFile(SPEC_PATH, `${root}/${SPEC_PATH}`);
+  await Deno.copyFile(latest, `${root}/${latest}`);
+  const output = await new Deno.Command(Deno.execPath(), {
+    args: [
+      "run",
+      "--config",
+      new URL("../deno.json", import.meta.url).pathname,
+      "--allow-read=openapi.json",
+      "--allow-write=supabase/migrations",
+      new URL("../scripts/generate.ts", import.meta.url).pathname,
+    ],
+    cwd: root,
+  }).output();
+  assertEquals(output.code, 1);
+  assertStringIncludes(new TextDecoder().decode(output.stderr), 'Requires read access to "supabase/migrations"');
+  const names = await Array.fromAsync(Deno.readDir(`${root}/supabase/migrations`), (entry) => entry.name);
+  assertEquals(names.map((name) => `supabase/migrations/${name}`), [latest]);
+});
+
+Deno.test("latestRegistryMigration names the directory that has no registry migration", () => {
+  const root = Deno.makeTempDirSync();
+  Deno.mkdirSync(`${root}/supabase/migrations`, { recursive: true });
+  const cwd = Deno.cwd();
+  Deno.chdir(root);
+  try {
+    assertThrows(
+      latestRegistryMigration,
+      Deno.errors.NotFound,
+      "No *_xquik_operations.sql migration in supabase/migrations",
+    );
+  } finally {
+    Deno.chdir(cwd);
+  }
 });
