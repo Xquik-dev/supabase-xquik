@@ -98,13 +98,13 @@ select attrs ->> 'text' from xquik.search_tweets where q = 'from:NASA' limit 20;
 - Path & query parameters are columns, & an `=` filter sends them.
 - Quote mixed-case names, as in `where "pageSize" = 50`.
 - `attrs` holds each row as JSON.
-- A `limit` stops paging early.
+- A SQL `limit` clause stops paging early.
 - A query reads at most 10 pages unless you raise the server's `max_pages`, as in `alter server xquik_server options (set max_pages '50')`. The server keeps its options when the tables change.
 - The tables read your API key from the `xquik_api_key` Vault secret.
 - Query them as `postgres`, the role the SQL editor, cron jobs & direct database connections use.
 - `xquik.export_draw` & `xquik.export_extraction` return JSON rows.
 - Event streams & support attachment downloads have no table. Use the `xquik-webhook` receiver or an Edge Function for them.
-- When `openapi.json` changes, the next foreign tables migration rebuilds only the tables whose operation changed & drops the tables of removed operations. It also drops any other foreign table on `xquik_server` in the `xquik` schema.
+- When `openapi.json` changes, the next foreign tables migration rebuilds only the tables whose columns or options changed & drops the tables of removed operations. It also drops any other foreign table on `xquik_server` in the `xquik` schema.
 - A view on a table that the migration rebuilds or drops stops the migration with Postgres's dependency error. Drop the view, run the migration & create the view again. Views on the other tables stay.
 
 ## Schedule calls
