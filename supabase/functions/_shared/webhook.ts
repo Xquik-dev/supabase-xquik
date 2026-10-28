@@ -66,10 +66,17 @@ async function signedByAny(
   return results.some((valid) => valid);
 }
 
+function signedMessage(timestamp: string, nonce: string, rawBody: Uint8Array): Uint8Array<ArrayBuffer> {
+  const prefix = encoder.encode(`${timestamp}.${nonce}.`);
+  const message = new Uint8Array(prefix.length + rawBody.length);
+  message.set(prefix);
+  message.set(rawBody, prefix.length);
+  return message;
+}
+
 function parseBody(rawBody: Uint8Array): Delivery | undefined {
   try {
-    const parsed = deliveryBody.safeParse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(rawBody)));
-    return parsed.success ? parsed.data : undefined;
+    return deliveryBody.safeParse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(rawBody))).data;
   } catch {
     return undefined;
   }
@@ -84,13 +91,12 @@ export async function verifyDelivery(
   if (!/^\d{1,16}$/.test(timestamp) || Math.abs(nowMs - Number(timestamp)) > TOLERANCE_MS) {
     return { ok: false, reason: "stale" };
   }
-  const nonce = headers.get("x-xquik-nonce") ?? "";
+  const nonce = headers.get("x-xquik-nonce");
   const signature = /^sha256=([0-9a-f]{64})$/.exec(headers.get("x-xquik-signature") ?? "")?.[1];
-  const prefix = encoder.encode(`${timestamp}.${nonce}.`);
-  const message = new Uint8Array(prefix.length + rawBody.length);
-  message.set(prefix);
-  message.set(rawBody, prefix.length);
-  if (nonce === "" || signature === undefined || !(await signedByAny(secrets, signature, message))) {
+  if (
+    nonce === null || nonce === "" || signature === undefined ||
+    !(await signedByAny(secrets, signature, signedMessage(timestamp, nonce, rawBody)))
+  ) {
     return { ok: false, reason: "signature" };
   }
   const delivery = parseBody(rawBody);

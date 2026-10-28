@@ -11,7 +11,13 @@ const CONNECTION: Deno.ServeHandlerInfo = {
 };
 
 type Handler = (request: Request) => Promise<Response>;
-type Received = { readonly table: string; readonly apiKey: string | null; readonly body: unknown };
+type Received = {
+  readonly table: string;
+  readonly apiKey: string | null;
+  readonly query: string;
+  readonly prefer: string | null;
+  readonly body: unknown;
+};
 type Postgrest = { readonly url: string; readonly received: Received[]; readonly server: Deno.HttpServer };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -22,9 +28,11 @@ function fakePostgrest(): Postgrest {
   const keys = { "xquik_webhook_nonces": new Set<unknown>(), "xquik_events": new Set<unknown>() };
   const received: Received[] = [];
   const server = Deno.serve({ hostname: "127.0.0.1", port: 0, onListen: () => {} }, async (request) => {
-    const table = new URL(request.url).pathname.replace("/rest/v1/", "");
+    const { pathname, search } = new URL(request.url);
+    const table = pathname.replace("/rest/v1/", "");
     const body = await request.json();
-    received.push({ table, apiKey: request.headers.get("apikey"), body });
+    const { headers } = request;
+    received.push({ table, apiKey: headers.get("apikey"), query: search, prefer: headers.get("prefer"), body });
     const row = isRecord(body) ? body : {};
     const isNonce = table === "xquik_webhook_nonces";
     const key = isNonce ? row["nonce"] : row["stream_event_id"];
@@ -116,6 +124,13 @@ Deno.test("the xquik-webhook function stores each event once through PostgREST a
       "xquik_webhook_nonces",
       "xquik_events",
     ]);
+    const upserts = postgrest.received.filter(({ table }) => table === "xquik_events");
+    assertEquals(
+      new Set(upserts.map(({ query, prefer }) => `${query} ${String(prefer)}`)),
+      new Set([
+        "?on_conflict=stream_event_id&select=stream_event_id resolution=ignore-duplicates, return=representation",
+      ]),
+    );
     assertEquals(postgrest.received.at(-1)?.body, {
       stream_event_id: "9002",
       delivery_id: null,
@@ -130,7 +145,18 @@ Deno.test("the xquik-webhook function stores each event once through PostgREST a
       event_type: "tweet.new",
       monitor_id: "10",
       occurred_at: "2026-02-24T14:22:00.000Z",
-      payload: event,
+      payload: {
+        eventType: "tweet.new",
+        schemaVersion: 1,
+        deliveryId: "502",
+        streamEventId: "9001",
+        occurredAt: "2026-02-24T14:22:00.000Z",
+        monitorId: "10",
+        monitorType: "account",
+        username: "NASA",
+        xUserId: "11348282",
+        data: { id: "1893456789012345678", text: "Liftoff." },
+      },
     });
   } finally {
     console.log = log;
