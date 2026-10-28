@@ -26,6 +26,20 @@ language sql as $$
   returning id;
 $$;
 
+create function vault.update_secret(
+  secret_id uuid,
+  new_secret text default null,
+  new_name text default null,
+  new_description text default null
+)
+returns void
+language sql as $$
+  update vault.secrets
+  set secret = coalesce(new_secret, secret), name = coalesce(new_name, name),
+    description = coalesce(new_description, description)
+  where id = secret_id;
+$$;
+
 grant usage on schema public to anon, authenticated, service_role;
 alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
 alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
