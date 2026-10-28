@@ -81,10 +81,11 @@ run_check() {
 run_check "install" "Install the locked Deno version" \
   "Install Bun and check network access, or update bun.lock, then rerun." \
   bun install --frozen-lockfile
-run_check "format, lint & types" "Format check, lint and type check" \
-  "Run node_modules/.bin/deno fmt, then fix the remaining findings above." \
-  node_modules/.bin/deno task check
-run_check "tests" "Tests" "Fix the failing tests above." node_modules/.bin/deno task test
+deno=node_modules/.bin/deno
+run_check "format" "Format check" "Run $deno fmt, then rerun." "$deno" fmt --check
+run_check "lint" "Lint" "Fix the lint findings above." "$deno" lint
+run_check "types" "Type check" "Fix the type errors above." "$deno" check
+run_check "tests" "Tests" "Fix the failing tests above." "$deno" test --allow-read --allow-env tests/*_test.ts
 
 current_check="Final tree check"
 if [[ -n "$status_commit" ]]; then
