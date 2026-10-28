@@ -1,29 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
+import type { Database } from "../_shared/database.types.ts";
 import { type DeliveryStore, handleDelivery, type MonitorEvent, parseSecrets } from "../_shared/webhook.ts";
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
-
-type Table<Row, Insert> = { Row: Row; Insert: Insert; Update: Partial<Insert>; Relationships: [] };
-type EventRow = {
-  "stream_event_id": string;
-  "delivery_id": string | null;
-  "event_type": string;
-  "monitor_id": string | null;
-  "occurred_at": string;
-  payload: unknown;
-};
-type Database = {
-  public: {
-    Tables: {
-      "xquik_webhook_nonces": Table<{ nonce: string; "seen_at": string }, { nonce: string; "seen_at"?: string }>;
-      "xquik_events": Table<EventRow & { "received_at": string }, EventRow & { "received_at"?: string }>;
-    };
-    Views: Record<never, never>;
-    Functions: Record<never, never>;
-    Enums: Record<never, never>;
-    CompositeTypes: Record<never, never>;
-  };
-};
 
 function requiredEnv(name: string): string {
   const value = Deno.env.get(name);

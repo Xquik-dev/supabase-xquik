@@ -4,13 +4,13 @@ const TOLERANCE_MS = 5 * 60 * 1000;
 const encoder = new TextEncoder();
 const EXTRACTABLE = false;
 
-const monitorEvent = z.looseObject({
+const monitorEvent = z.object({
   eventType: z.string().min(1),
   streamEventId: z.string().min(1),
   occurredAt: z.iso.datetime({ offset: true }),
   deliveryId: z.string().optional(),
   monitorId: z.string().optional(),
-});
+}).catchall(z.json());
 export type MonitorEvent = z.infer<typeof monitorEvent>;
 
 const deliveryBody = z.union([

@@ -1,14 +1,49 @@
-import { assert, assertEquals, assertExists } from "@std/assert";
+import { assert, assertArrayIncludes, assertEquals, assertExists } from "@std/assert";
 import pg, { DatabaseError } from "pg";
 import { z } from "zod";
 import { FOREIGN_TABLES_SUFFIX } from "../scripts/foreign_tables.ts";
-import { latestMigration, migrationFiles, REGISTRY_SUFFIX, SPEC_PATH } from "../scripts/generate.ts";
+import { latestMigration, REGISTRY_SUFFIX, SPEC_PATH } from "../scripts/generate.ts";
+import "../supabase/functions/_shared/database.types.ts";
 
 type Row = Record<string, unknown>;
 type Reply = readonly [status: number, type: string | null, content: string | null];
 
+const DENO = "node_modules/.bin/deno";
+const SUPABASE = "node_modules/.bin/supabase";
+const TYPES = "supabase/functions/_shared/database.types.ts";
 const XQUIK = "https://xquik.com";
 const KEY = { "x-api-key": "xq_test_key" };
+const CLIENT_ROLES = ["anon", "authenticated"];
+const TABLES = [
+  {
+    name: "xquik.operations",
+    column: "path",
+    row: "(operation_id, method, path, kind) values ('probe', 'GET', '/', 'read')",
+  },
+  {
+    name: "public.xquik_actions",
+    column: "params",
+    row: "(operation_id, status, request_id, finished_at) values ('getAccount', 'failed', 1, now())",
+  },
+  {
+    name: "public.xquik_events",
+    column: "payload",
+    row: "(stream_event_id, event_type, occurred_at, payload) values ('1', 'tweet.new', now(), '{}')",
+  },
+  { name: "public.xquik_webhook_nonces", column: "seen_at", row: "(nonce) values ('n')" },
+];
+const FUNCTIONS = [
+  "api_key",
+  "build_request",
+  "call",
+  "collect",
+  "enqueue",
+  "queueable_request",
+  "response_body",
+  "rows",
+  "schedule",
+  "send_action",
+];
 const NO_JSON_ANSWER = ["downloadSupportAttachment", "streamEvents"];
 
 const security = z.array(z.record(z.string(), z.unknown()));
@@ -35,12 +70,13 @@ const catalogTables = z.array(z.object({
   columns: z.array(z.string()),
 }));
 
-async function run(command: string, args: string[]): Promise<void> {
-  const { success, stdout, stderr } = await new Deno.Command(command, { args }).output();
+async function run(command: string, args: string[], env: Record<string, string> = {}): Promise<string> {
+  const { success, stdout, stderr } = await new Deno.Command(command, { args, env }).output();
+  const decoder = new TextDecoder();
   if (!success) {
-    const decoder = new TextDecoder();
     throw new Error(`${command} ${args.join(" ")} failed\n${decoder.decode(stdout)}${decoder.decode(stderr)}`);
   }
+  return decoder.decode(stdout);
 }
 
 async function startCluster(dir: string): Promise<void> {
@@ -72,10 +108,9 @@ async function latestSql(suffix: string): Promise<string> {
   return await Deno.readTextFile(file);
 }
 
-async function applyMigrations(client: pg.Client): Promise<void> {
+async function applyMigrations(client: pg.Client, url: string): Promise<void> {
   await query(client, await Deno.readTextFile("tests/sql/supabase.sql"));
-  for (const file of migrationFiles()) await query(client, await Deno.readTextFile(file));
-  await query(client, "select vault.create_secret('xq_test_key', 'xquik_api_key')");
+  await run(SUPABASE, ["migration", "up", "--db-url", url], { XQUIK_API_KEY: KEY["x-api-key"] });
 }
 
 async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<void> {
@@ -392,15 +427,109 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
     },
   );
 
+  const plannedIndexes = async (statement: string): Promise<string[]> => {
+    const plan = JSON.stringify(await query(client, `explain (format json) ${statement}`));
+    return [...plan.matchAll(/"Index Name":"([^"]+)"/g)].map(([, name]) => String(name));
+  };
+
+  await step("anon and authenticated hold no privilege on any table or sequence in public or xquik", async () => {
+    assertEquals(
+      await sql`select c.oid::regclass::text as relation, a.grantee::regrole::text as role, a.privilege_type as privilege
+        from pg_class c, aclexplode(c.relacl) a
+        where c.relnamespace in ('public'::regnamespace, 'xquik'::regnamespace)
+          and a.grantee in ('anon'::regrole, 'authenticated'::regrole)`,
+      [],
+    );
+  });
+
+  await step("row level security denies anon and authenticated every operation even after a grant", async () => {
+    const outcomes: Record<string, unknown>[] = [];
+    for (const table of TABLES) {
+      await query(client, `insert into ${table.name} ${table.row} on conflict do nothing`);
+      for (const role of CLIENT_ROLES) {
+        await query(client, `grant usage on schema xquik to ${role}`);
+        await query(client, `grant select, insert, update, delete on ${table.name} to ${role}`);
+        await query(client, `set local role ${role}`);
+        const count = async (statement: string): Promise<unknown> =>
+          (await query(client, `with hit as (${statement} returning 1) select count(*)::integer as n from hit`))[0]
+            ?.["n"];
+        const [read] = await query(client, `select count(*)::integer as n from ${table.name}`);
+        outcomes.push({
+          role,
+          table: table.name,
+          read: read?.["n"],
+          changed: await count(`update ${table.name} set ${table.column} = ${table.column}`),
+          removed: await count(`delete from ${table.name}`),
+          added: (await failure(() => query(client, `insert into ${table.name} ${table.row}`))).message,
+        });
+        await sql`reset role`;
+      }
+    }
+    assertEquals(
+      outcomes,
+      TABLES.flatMap((table) =>
+        CLIENT_ROLES.map((role) => ({
+          role,
+          table: table.name,
+          read: 0,
+          changed: 0,
+          removed: 0,
+          added: `new row violates row-level security policy for table "${table.name.split(".")[1]}"`,
+        }))
+      ),
+    );
+  });
+
+  await step("every regular table in public and xquik carries a comment that says what it holds", async () => {
+    assertEquals(
+      await sql`select c.oid::regclass::text as relation from pg_class c
+        where c.relnamespace in ('public'::regnamespace, 'xquik'::regnamespace) and c.relkind in ('r', 'p')
+          and coalesce(obj_description(c.oid, 'pg_class'), '') = ''`,
+      [],
+    );
+  });
+
+  await step("each xquik function pins an empty search_path, and response_body runs as its caller", async () => {
+    assertEquals(
+      await sql`select p.proname as name, p.prosecdef as definer, p.proconfig as config
+        from pg_proc p where p.pronamespace = 'xquik'::regnamespace order by p.proname`,
+      FUNCTIONS.map((name) => ({ name, definer: name !== "response_body", config: ['search_path=""'] })),
+    );
+  });
+
+  await step("xquik.collect finds the sent actions among finished ones through xquik_actions_sent", async () => {
+    await sql`insert into public.xquik_actions (operation_id, status, request_id, finished_at)
+      select 'getAccount', 'succeeded', n, now() from generate_series(1, 10000) n`;
+    await enqueueAnswered([200, "application/json", '{"ok": true}']);
+    await sql`analyze public.xquik_actions`;
+    const [collect] = await sql`select prosrc as source from pg_proc where oid = 'xquik.collect'::regproc`;
+    assertArrayIncludes(await plannedIndexes(String(collect?.["source"])), ["xquik_actions_sent"]);
+    assertEquals(await sql`select xquik.collect() as finished`, [{ finished: 1 }]);
+  });
+
+  await step("reading events in order walks xquik_events_order", async () => {
+    await sql`insert into public.xquik_events (stream_event_id, event_type, occurred_at, payload)
+      select n::text, 'tweet.new', timestamptz '2026-10-28' + n * interval '1 second', '{}' from generate_series(1, 10000) n`;
+    await sql`analyze public.xquik_events`;
+    const ordered = "select stream_event_id from public.xquik_events order by occurred_at, stream_event_id limit 100";
+    assertArrayIncludes(await plannedIndexes(ordered), ["xquik_events_order"]);
+    assertEquals((await query(client, ordered)).length, 100);
+  });
+
   await step(
-    "rerunning the registry migration restores changed operations and drops stale ones no action uses",
+    "rerunning the registry migration restores changed operations and drops stale ones no action uses, looking up their actions through xquik_actions_operation_id",
     async () => {
       await sql`update xquik.operations set path = '/old', list_field = 'old' where operation_id = 'getUser'`;
+      await sql`insert into public.xquik_actions (operation_id, status, request_id, finished_at)
+      select o.operation_id, 'succeeded', n, now() from xquik.operations o, generate_series(1, 100) n`;
       await sql`insert into xquik.operations (operation_id, method, path, kind)
       values ('staleUnused', 'GET', '/unused', 'read'), ('staleUsed', 'GET', '/used', 'read')`;
       await sql`insert into public.xquik_actions (operation_id, status, request_id, finished_at)
       values ('staleUsed', 'failed', 1, now())`;
-      await query(client, await latestSql(REGISTRY_SUFFIX));
+      await sql`analyze public.xquik_actions`;
+      const registry = await latestSql(REGISTRY_SUFFIX);
+      assertArrayIncludes(await plannedIndexes(registry), ["xquik_actions_operation_id"]);
+      await query(client, registry);
       assertEquals(
         await sql`select operation_id as operation, method, path, kind, list_field as list
         from xquik.operations where operation_id in ('getUser', 'staleUnused', 'staleUsed') order by operation_id`,
@@ -508,16 +637,53 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
   });
 }
 
+async function formatted(source: string): Promise<string> {
+  const child = new Deno.Command(DENO, { args: ["fmt", "--ext=ts", "-"], stdin: "piped", stdout: "piped" }).spawn();
+  const writer = child.stdin.getWriter();
+  await writer.write(new TextEncoder().encode(source));
+  await writer.close();
+  const { success, stdout } = await child.output();
+  assert(success, "deno fmt formats the generated types");
+  return new TextDecoder().decode(stdout);
+}
+
+async function testCli(t: Deno.TestContext, client: pg.Client, url: string): Promise<void> {
+  await t.step("the Supabase advisors report nothing at any level", async () => {
+    await query(client, "select pg_stat_force_next_flush()");
+    await run(SUPABASE, ["db", "advisors", "--db-url", url, "--type", "all", "--level", "info", "--fail-on", "info"]);
+  });
+
+  await t.step(`${TYPES} matches supabase gen types for the public schema`, async () => {
+    const generated = await run(SUPABASE, ["gen", "types", "typescript", "--db-url", url, "--schema", "public"]);
+    assertEquals(await Deno.readTextFile(TYPES), await formatted(generated), "Run deno task types.");
+  });
+
+  await t.step("rerunning the index migration rebuilds an index that a failed build left invalid", async () => {
+    const index = "'public.xquik_actions_operation_id'::regclass";
+    await query(client, `update pg_catalog.pg_index set indisvalid = false where indexrelid = ${index}`);
+    await query(client, "delete from supabase_migrations.schema_migrations where version = '20261028150128'");
+    await run(SUPABASE, ["migration", "up", "--include-all", "--db-url", url], { XQUIK_API_KEY: KEY["x-api-key"] });
+    assertEquals(
+      await query(client, `select indisvalid as valid from pg_catalog.pg_index where indexrelid = ${index}`),
+      [
+        { valid: true },
+      ],
+    );
+  });
+}
+
 Deno.test("the SQL functions and triggers on a throwaway Postgres 18 cluster", async (t) => {
   const dir = await Deno.makeTempDir({ dir: "/tmp", prefix: "xquik-sql-" });
   try {
     await startCluster(dir);
     try {
       const client = new pg.Client({ host: dir, user: "postgres", database: "postgres" });
+      const url = `postgresql://localhost/postgres?user=postgres&host=${encodeURIComponent(dir)}`;
       await client.connect();
       try {
-        await applyMigrations(client);
+        await applyMigrations(client, url);
         await testFunctions(t, client);
+        await testCli(t, client, url);
       } finally {
         await client.end();
       }

@@ -6,7 +6,7 @@ export const SPEC_PATH = "openapi.json";
 const MIGRATIONS = "supabase/migrations";
 export const REGISTRY_SUFFIX = "_xquik_operations.sql";
 
-export function migrationFiles(): string[] {
+function migrationFiles(): string[] {
   return Deno.readDirSync(MIGRATIONS).map((entry) => `${MIGRATIONS}/${entry.name}`).filter((path) =>
     path.endsWith(".sql")
   ).toArray().sort();

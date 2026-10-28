@@ -39,7 +39,7 @@ Checked on 2026-10-28. See each number with its date & source on [xquik.com/trus
 - `xquik.call`, `xquik.rows`, `xquik.enqueue` & `xquik.schedule` for SQL, cron jobs & triggers.
 - Foreign tables in the `xquik` schema for public reads.
 - The `xquik-webhook` Edge Function. It checks each delivery's signature & stores each event once.
-- Row level security on every regular table, with no policies. Only the service role reads them.
+- Row level security on every regular table. Policies deny `anon` and `authenticated` each operation, and neither holds a grant, so only the service role reads them.
 
 ## Start everything with 1 command
 
@@ -69,6 +69,8 @@ Deno.serve(async () => {
 ```
 
 The client types every method & parameter. `askDocs` searches the Xquik docs. `getSportsGameView` reads game rosters, player props & posts.
+
+A function that imports `_shared/xquik.ts` lists `x-twitter-scraper` and `zod` in its own `deno.json`.
 
 ## Read X data with SQL
 
@@ -167,9 +169,10 @@ deno task check
 deno task test
 XQUIK_WEBHOOK_SECRET=your_webhook_secret deno task test:stack
 deno task generate
+deno task types
 ```
 
-`deno task test` proves that every operation in `openapi.json` has a tested path. It also proves that every event type gets a receiver result. The foreign table test checks each table against `openapi.json`. `deno task test:stack` runs against `supabase start`. `deno task generate` rebuilds the operation list & the foreign tables from `openapi.json`. `bin/check-local` installs the pinned Deno with Bun. Then it runs the checks & tests.
+`deno task test` proves that every operation in `openapi.json` has a tested path. It also proves that every event type gets a receiver result. The SQL tests check each foreign table against `openapi.json`. `deno task test:stack` runs against `supabase start`. `deno task generate` rebuilds the operation list and the foreign tables from `openapi.json`. `deno task types` regenerates `supabase/functions/_shared/database.types.ts` from `supabase start`. `bin/check-local` installs the pinned Deno with Bun. Then it runs the checks and tests.
 
 ## Documentation
 

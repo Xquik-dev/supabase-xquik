@@ -177,4 +177,3 @@ enabled = true
 
 [functions.xquik-webhook]
 verify_jwt = false
-import_map = "../deno.json"

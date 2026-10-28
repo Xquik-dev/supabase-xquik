@@ -214,7 +214,13 @@ run_codeql() {
 }
 
 lint_sql() {
-  git ls-files -z -- '*.sql' | xargs -0 -r node_modules/.bin/squawk --assume-in-transaction
+  local listing file in_transaction=() concurrent=()
+  listing="$(git ls-files -- '*.sql')" || return
+  while IFS= read -r file; do
+    if grep -qiE '^\s*create\s+(unique\s+)?index\s+concurrently\s' "${file}"; then concurrent+=("${file}"); else in_transaction+=("${file}"); fi
+  done <<<"${listing}"
+  node_modules/.bin/squawk --assume-in-transaction "${in_transaction[@]}" &&
+    { ((${#concurrent[@]} == 0)) || node_modules/.bin/squawk "${concurrent[@]}"; }
 }
 
 run_check "bans" "Suppression and exclusion ban" \
