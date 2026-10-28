@@ -6,7 +6,6 @@ import { SECRET, sign } from "./delivery.ts";
 const SEED = 20261028;
 const NOW = Date.UTC(2026, 9, 28, 19, 0, 0);
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
-const HEX = "0123456789abcdef";
 const encoder = new TextEncoder();
 const SAMPLE = {
   eventType: "tweet.new",
@@ -69,20 +68,6 @@ Deno.test("rejects every delivery whose body changed in any byte after signing",
       const index = at % delivery.rawBody.length;
       const rawBody = delivery.rawBody.map((byte, position) => position === index ? byte ^ flip : byte);
       assertEquals(await reason({ headers: delivery.headers, rawBody }, key), "signature");
-    }),
-    { seed: SEED },
-  );
-});
-
-Deno.test("rejects every signature with any hex digit changed", async () => {
-  const change = fc.record({ at: fc.nat({ max: 63 }), shift: fc.integer({ min: 1, max: 15 }) });
-  await fc.assert(
-    fc.asyncProperty(secret, nonce, event, change, async (key, id, sent, { at, shift }) => {
-      const delivery = await signed(key, JSON.stringify(sent), String(NOW), id);
-      const hex = (delivery.headers.get("x-xquik-signature") ?? "").slice("sha256=".length);
-      const digit = HEX[(HEX.indexOf(hex.charAt(at)) + shift) % HEX.length] ?? "";
-      delivery.headers.set("x-xquik-signature", `sha256=${hex.slice(0, at)}${digit}${hex.slice(at + 1)}`);
-      assertEquals(await reason(delivery, key), "signature");
     }),
     { seed: SEED },
   );

@@ -136,7 +136,7 @@ Deno.test("lists SQL mutants inside function bodies only, and none inside a stri
   ]);
 });
 
-Deno.test("runs the tests that reach each mutant in a copy, all tests for SQL, and leaves the tree as it was", async () => {
+Deno.test("runs the tests that load the file of each mutant in a copy, all tests for SQL, and leaves the tree as it was", async () => {
   const root = await fixture(MATH_TEST);
   const mutants = [...mutantsOf("math.ts", MATH), ...mutantsOf("notes.sql", NOTES)];
   const results = await runMutants(root, mutants, ["tests/math_test.ts"], 2);
@@ -180,7 +180,10 @@ Deno.test("scores the percentage the summary prints, rounded to 2 decimals", () 
     outcome: "survived",
   }];
   assertEquals(score(results), 66.67);
-  assertEquals(summary(results).split("\n").at(-1)?.startsWith("Mutation score is 66.67%."), true);
+  assertEquals(
+    summary(results).split("\n").at(-1),
+    "Mutation score is 66.67%. The tests killed 2 of 3 mutants that compiled. 0 of 3 mutants did not compile.",
+  );
 });
 
 Deno.test("the command lists each survivor and exits 1 only below the minimum score", async () => {

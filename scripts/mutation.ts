@@ -138,12 +138,7 @@ function copyTree(from: string, to: string): void {
 }
 
 type TestRun = { readonly passed: boolean; readonly compiled: boolean; readonly output: string; readonly ms: number };
-type Covered = {
-  readonly test: string;
-  readonly ms: number;
-  readonly files: ReadonlySet<string>;
-  readonly lines: ReadonlySet<string>;
-};
+type Covered = { readonly test: string; readonly ms: number; readonly files: ReadonlySet<string> };
 
 async function runTests(dir: string, tests: readonly string[], timeoutMs: number, report = ""): Promise<TestRun> {
   const env = Deno.env.toObject();
@@ -168,14 +163,10 @@ async function cover(dir: string, test: string, report: string): Promise<Covered
   const { stdout } = await new Deno.Command(Deno.execPath(), { args: ["coverage", "--lcov", report], cwd: dir })
     .output();
   const files = new Set<string>();
-  const lines = new Set<string>();
-  let file = "";
   for (const line of new TextDecoder().decode(stdout).split("\n")) {
-    const [kind, number, hits] = line.split(/[:,]/);
-    if (kind === "SF") files.add(file = line.slice(`SF:${dir}/`.length));
-    if (kind === "DA" && hits !== "0") lines.add(`${file}:${number}`);
+    if (line.startsWith("SF:")) files.add(line.slice(`SF:${dir}/`.length));
   }
-  return { test, ms: run.ms, files, lines };
+  return { test, ms: run.ms, files };
 }
 
 async function pool<T, R>(
@@ -208,10 +199,8 @@ export async function runMutants(
     }));
     const covered = await pool(tests, copies, (dir, test) => cover(dir, test, `${dir}.coverage/${test}`));
     return await pool(mutants, copies, async (dir, mutant): Promise<Result> => {
-      const chosen = covered.some(({ files }) => files.has(mutant.file))
-        ? covered.filter(({ lines }) => lines.has(`${mutant.file}:${mutant.line}`))
-        : covered;
-      if (chosen.length === 0) return { mutant, outcome: "survived" };
+      const loading = covered.filter(({ files }) => files.has(mutant.file));
+      const chosen = loading.length > 0 ? loading : covered;
       const path = `${dir}/${mutant.file}`;
       const original = await Deno.readTextFile(path);
       await Deno.writeTextFile(path, original.slice(0, mutant.start) + mutant.replacement + original.slice(mutant.end));
