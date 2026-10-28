@@ -440,6 +440,14 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
     );
   });
 
+  await step("each xquik function pins an empty search_path, and response_body runs as its caller", async () => {
+    assertEquals(
+      await sql`select p.proname as name, p.prosecdef as definer, p.proconfig as config
+        from pg_proc p where p.pronamespace = 'xquik'::regnamespace order by p.proname`,
+      FUNCTIONS.map((name) => ({ name, definer: name !== "response_body", config: ['search_path=""'] })),
+    );
+  });
+
   await step(
     "rerunning the registry migration restores changed operations and drops stale ones no action uses",
     async () => {
