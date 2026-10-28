@@ -15,7 +15,7 @@ select set_eq(
     ('xquik.rows(text,jsonb)', true, 'volatile'),
     ('xquik.schedule(text,text,text,jsonb)', true, 'volatile'),
     ('xquik.send_action()', true, 'volatile')$$,
-  'xquik holds exactly these 10 functions, and only response_body runs as its caller'
+  'xquik holds exactly these 10 functions at these volatilities, and only response_body runs as its caller'
 );
 select is_empty(
   $$select p.oid::regprocedure::text from pg_catalog.pg_proc p
