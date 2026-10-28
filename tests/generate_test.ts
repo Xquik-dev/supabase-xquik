@@ -1,10 +1,11 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertMatch, assertStringIncludes, assertThrows } from "@std/assert";
+import { z } from "zod";
 import { latestRegistryMigration, operationRows, renderMigration, SPEC_PATH } from "../scripts/generate.ts";
 
 const rows = operationRows(JSON.parse(await Deno.readTextFile(SPEC_PATH)));
 
 Deno.test("the latest registry migration matches a fresh generation from openapi.json", async () => {
-  assertEquals(await Deno.readTextFile(await latestRegistryMigration()), renderMigration(rows));
+  assertEquals(await Deno.readTextFile(latestRegistryMigration()), renderMigration(rows));
 });
 
 Deno.test("list_field names the required array that every success shape shares", () => {
@@ -27,4 +28,78 @@ Deno.test("list_field names the required array that every success shape shares",
       getUser: null,
     },
   );
+});
+
+Deno.test("operationRows names a broken reference in openapi.json", () => {
+  const spec = {
+    security: [{ apiKey: [] }],
+    info: { title: "Xquik" },
+    paths: { "/x": { get: { operationId: "getX", responses: { "200": { $ref: "#/info/title/deeper" } } } } },
+  };
+  assertThrows(() => operationRows(spec), Error, "openapi.json has a broken reference #/info/title/deeper");
+});
+
+Deno.test("deno task generate writes a migration once and reuses it while openapi.json stays the same", async () => {
+  const root = await Deno.makeTempDir();
+  await Deno.mkdir(`${root}/supabase/migrations`, { recursive: true });
+  await Deno.copyFile(SPEC_PATH, `${root}/${SPEC_PATH}`);
+  const summary = z.object({ operations: z.number(), file: z.string(), changed: z.boolean() });
+  const generate = async (): Promise<z.infer<typeof summary>> => {
+    const output = await new Deno.Command(Deno.execPath(), {
+      args: [
+        "run",
+        "--config",
+        new URL("../deno.json", import.meta.url).pathname,
+        "--allow-read=openapi.json,supabase/migrations",
+        "--allow-write=supabase/migrations",
+        new URL("../scripts/generate.ts", import.meta.url).pathname,
+      ],
+      cwd: root,
+    }).output();
+    return summary.parse(JSON.parse(new TextDecoder().decode(output.stdout)));
+  };
+  const first = await generate();
+  assertEquals([first.operations, first.changed], [rows.length, true]);
+  assertMatch(first.file, /^supabase\/migrations\/\d{14}_xquik_operations\.sql$/);
+  assertEquals(await Deno.readTextFile(`${root}/${first.file}`), renderMigration(rows));
+  assertEquals(await generate(), { ...first, changed: false });
+});
+
+Deno.test("deno task generate stops when it cannot read the migrations, so it writes no duplicate", () => {
+  const root = Deno.makeTempDirSync();
+  const latest = latestRegistryMigration();
+  Deno.mkdirSync(`${root}/supabase/migrations`, { recursive: true });
+  Deno.copyFileSync(SPEC_PATH, `${root}/${SPEC_PATH}`);
+  Deno.copyFileSync(latest, `${root}/${latest}`);
+  const output = new Deno.Command(Deno.execPath(), {
+    args: [
+      "run",
+      "--config",
+      new URL("../deno.json", import.meta.url).pathname,
+      "--allow-read=openapi.json",
+      "--allow-write=supabase/migrations",
+      new URL("../scripts/generate.ts", import.meta.url).pathname,
+    ],
+    cwd: root,
+  }).outputSync();
+  assertEquals(output.code, 1);
+  assertStringIncludes(new TextDecoder().decode(output.stderr), 'Requires read access to "supabase/migrations"');
+  const names = Deno.readDirSync(`${root}/supabase/migrations`).map((entry) => `supabase/migrations/${entry.name}`);
+  assertEquals(names.toArray(), [latest]);
+});
+
+Deno.test("latestRegistryMigration names the directory that has no registry migration", () => {
+  const root = Deno.makeTempDirSync();
+  Deno.mkdirSync(`${root}/supabase/migrations`, { recursive: true });
+  const cwd = Deno.cwd();
+  Deno.chdir(root);
+  try {
+    assertThrows(
+      latestRegistryMigration,
+      Deno.errors.NotFound,
+      "No *_xquik_operations.sql migration in supabase/migrations",
+    );
+  } finally {
+    Deno.chdir(cwd);
+  }
 });

@@ -5,6 +5,7 @@
     "": {
       "devDependencies": {
         "deno": "2.9.6",
+        "squawk-cli": "2.68.0",
       },
     },
   },
@@ -21,6 +22,22 @@
 
     "@deno/win32-x64": ["@deno/win32-x64@2.9.6", "", { "os": "win32", "cpu": "x64" }, "sha512-qRGnmVz/Ea6UWPht/S3xFRK17UZ/ls38DSVfgGB17fpASLxPkksqzWUI/BzL9YYoOknYzfc94mySGyInZu/JXw=="],
 
+    "@squawk-cli/darwin-arm64": ["@squawk-cli/darwin-arm64@2.68.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-MDe5/uRqkoBvU4MVzPwRJZHoRxZ78vNhyYeoy/0mZKhZz64xH6zQozoJBM7W9pspHGjBQ2u+tEVf30gurBGS9A=="],
+
+    "@squawk-cli/darwin-x64": ["@squawk-cli/darwin-x64@2.68.0", "", { "os": "darwin", "cpu": "x64" }, "sha512-NTuclGY2a/9H6jfGbxot401sdQH3su4MbQeBNrXY/EeH3CUKQtOXSyI6vMvR4wQut6lc/uU3TpofK2CVM8YpEA=="],
+
+    "@squawk-cli/linux-arm64": ["@squawk-cli/linux-arm64@2.68.0", "", { "os": "linux", "cpu": "arm64", "libc": "glibc" }, "sha512-//HDEdhO4QSFY8VPvPfYBEcSgXaa4wyycyLSvdvJ9uC03REGy+0UvYZyGZy1qOwnoIoVr8aWukZ9b68Lsz0mtg=="],
+
+    "@squawk-cli/linux-arm64-musl": ["@squawk-cli/linux-arm64-musl@2.68.0", "", { "os": "linux", "cpu": "arm64", "libc": "musl" }, "sha512-JbvhsK9WxLWN0eDUO8skclUKhn9qIcYPmAakiFrmnAKqvhCzwzBvVnQX1E5Y+BduaFJpap36eJq/4gEzVSHJ/g=="],
+
+    "@squawk-cli/linux-x64": ["@squawk-cli/linux-x64@2.68.0", "", { "os": "linux", "cpu": "x64", "libc": "glibc" }, "sha512-by8mRyKmVCrJ42fV3/wcAD8KdsupMHWIT/9ubmwxKHrl9TDetDgOtOo4xQKfND5n2RH5yBBsjgW1ailOgSl3QQ=="],
+
+    "@squawk-cli/linux-x64-musl": ["@squawk-cli/linux-x64-musl@2.68.0", "", { "os": "linux", "cpu": "x64", "libc": "musl" }, "sha512-kBwXlCFhIRNaJaLN+gtI9pi4zS6p1QgVvD2Gf5yyQ3Z3tv5dzCZ0FcMETcxwE2CW+2Wa1lnevy0OUWktc0+Btw=="],
+
+    "@squawk-cli/win32-x64": ["@squawk-cli/win32-x64@2.68.0", "", { "os": "win32", "cpu": "x64" }, "sha512-++jd0uZ1UatYzdBz4wao8Ip525xjDTbvx+pJK+A21yeKfXZQTaB0RJXsIae7cofSFOgRAXvwVzlzK8PWzlpjsg=="],
+
     "deno": ["deno@2.9.6", "", { "optionalDependencies": { "@deno/darwin-arm64": "2.9.6", "@deno/darwin-x64": "2.9.6", "@deno/linux-arm64-glibc": "2.9.6", "@deno/linux-x64-glibc": "2.9.6", "@deno/win32-arm64": "2.9.6", "@deno/win32-x64": "2.9.6" }, "hasInstallScript": true, "bin": { "deno": "bin.cjs" } }, "sha512-cr16GxYiUeH1juNvFTMOxt99V5QRVmANfy5UsZvE5hjC6P/o4Op/MBbRhLeBOL8WJpV6tr9hb+Kjb1MW0nEoVg=="],
+
+    "squawk-cli": ["squawk-cli@2.68.0", "", { "optionalDependencies": { "@squawk-cli/darwin-arm64": "2.68.0", "@squawk-cli/darwin-x64": "2.68.0", "@squawk-cli/linux-arm64": "2.68.0", "@squawk-cli/linux-arm64-musl": "2.68.0", "@squawk-cli/linux-x64": "2.68.0", "@squawk-cli/linux-x64-musl": "2.68.0", "@squawk-cli/win32-x64": "2.68.0" }, "bin": { "squawk": "js/bin/squawk" } }, "sha512-hH+pvEPxPutJ1zDDP1DOY5sJv7wAngPAEW33Flta18yB1+/nLifbRTYpMvHHXtNneJIPZHHo941sc/mPzP8wQw=="],
   }
 }

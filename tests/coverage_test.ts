@@ -42,7 +42,8 @@ function operationFor(method: string, path: string): Operation | undefined {
   return matches.sort((a, b) => params(a) - params(b))[0];
 }
 
-const recorded: { method: string; path: string }[] = [];
+type Recorded = { method: string; path: string };
+const recorded: Recorded[] = [];
 const fakeFetch: typeof fetch = (input, init) => {
   const url = input instanceof Request ? input.url : input;
   recorded.push({ method: init?.method ?? "GET", path: new URL(url).pathname });
@@ -54,19 +55,27 @@ const placeholder: object = new Proxy({}, {
     key === Symbol.toPrimitive ? () => "placeholder" : typeof key === "string" ? "placeholder" : undefined,
 });
 
-function resourcesOf(node: object): APIResource[] {
-  return Object.values(node)
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isCallable(value: unknown): value is (...args: unknown[]) => unknown {
+  return typeof value === "function";
+}
+
+function resourcesOf(node: unknown): APIResource[] {
+  return Object.values(isRecord(node) ? node : {})
     .filter((value): value is APIResource => value instanceof APIResource)
     .flatMap((resource) => [resource, ...resourcesOf(resource)]);
 }
 
-async function requestOf(resource: APIResource, name: string) {
-  const method: unknown = Reflect.get(resource, name);
-  if (typeof method !== "function") return undefined;
+async function requestOf(resource: APIResource, name: string): Promise<Recorded | undefined> {
+  const method = isRecord(resource) ? resource[name] : undefined;
+  if (!isCallable(method)) return undefined;
   for (let count = 0; count <= method.length + 1; count++) {
     recorded.length = 0;
     const args = Array.from({ length: count }, () => placeholder);
-    await Promise.resolve().then(() => Reflect.apply(method, resource, args)).catch(() => undefined);
+    await Promise.resolve().then(() => method.apply(resource, args)).catch(() => undefined);
     if (recorded.length === 1) return recorded[0];
   }
   return undefined;
@@ -76,14 +85,14 @@ Deno.test("every in-scope operation has a tested Supabase path", async () => {
   const client = createXquik({ apiKey: "placeholder", fetch: fakeFetch, maxRetries: 0 });
   const viaSdk = new Set<string>();
   for (const resource of resourcesOf(client)) {
-    for (const name of Object.getOwnPropertyNames(Object.getPrototypeOf(resource))) {
+    for (const name of Object.getOwnPropertyNames(Reflect.getPrototypeOf(resource) ?? {})) {
       const request = name === "constructor" ? undefined : await requestOf(resource, name);
       const op = request && operationFor(request.method, request.path);
       if (op?.inScope) viaSdk.add(op.id);
     }
   }
 
-  async function viaHelper(calls: (() => Promise<unknown>)[]) {
+  async function viaHelper(calls: (() => Promise<unknown>)[]): Promise<Set<string>> {
     const ids = new Set<string>();
     for (const call of calls) {
       recorded.length = 0;
@@ -106,7 +115,7 @@ Deno.test("every in-scope operation has a tested Supabase path", async () => {
     ),
   );
 
-  const migration = await Deno.readTextFile(await latestRegistryMigration());
+  const migration = await Deno.readTextFile(latestRegistryMigration());
   const registry = new Set(
     [...migration.matchAll(/^ {4}\('([^']+)', '([A-Z]+)', '([^']+)'/gm)].map(([, id, method, path]) =>
       `${id} ${method} ${path}`

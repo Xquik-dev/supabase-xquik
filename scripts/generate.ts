@@ -4,14 +4,16 @@ export const SPEC_PATH = "openapi.json";
 const MIGRATIONS = "supabase/migrations";
 const REGISTRY_SUFFIX = "_xquik_operations.sql";
 
-export async function latestRegistryMigration(): Promise<string> {
-  const names: string[] = [];
-  for await (const entry of Deno.readDir(MIGRATIONS)) {
-    if (entry.name.endsWith(REGISTRY_SUFFIX)) names.push(entry.name);
-  }
-  const latest = names.sort().at(-1);
+export function migrationFiles(): string[] {
+  return Deno.readDirSync(MIGRATIONS).map((entry) => `${MIGRATIONS}/${entry.name}`).filter((path) =>
+    path.endsWith(".sql")
+  ).toArray().sort();
+}
+
+export function latestRegistryMigration(): string {
+  const latest = migrationFiles().filter((path) => path.endsWith(REGISTRY_SUFFIX)).at(-1);
   if (latest === undefined) throw new Deno.errors.NotFound(`No *${REGISTRY_SUFFIX} migration in ${MIGRATIONS}`);
-  return `${MIGRATIONS}/${latest}`;
+  return latest;
 }
 
 const METHODS = { get: "GET", put: "PUT", post: "POST", patch: "PATCH", delete: "DELETE" } as const;
@@ -139,10 +141,10 @@ set method = excluded.method,
 if (import.meta.main) {
   const rows = operationRows(JSON.parse(await Deno.readTextFile(SPEC_PATH)));
   const sql = renderMigration(rows);
-  const latest = await latestRegistryMigration().catch(() => "");
-  const current = latest === "" ? "" : await Deno.readTextFile(latest);
+  const latest = migrationFiles().findLast((path) => path.endsWith(REGISTRY_SUFFIX));
+  const unchanged = latest !== undefined && await Deno.readTextFile(latest) === sql;
   const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
-  const file = current === sql ? latest : `${MIGRATIONS}/${stamp}${REGISTRY_SUFFIX}`;
-  if (file !== latest) await Deno.writeTextFile(file, sql);
-  console.log(JSON.stringify({ operations: rows.length, file, changed: file !== latest }));
+  const file = unchanged ? latest : `${MIGRATIONS}/${stamp}${REGISTRY_SUFFIX}`;
+  if (!unchanged) await Deno.writeTextFile(file, sql);
+  console.log(JSON.stringify({ operations: rows.length, file, changed: !unchanged }));
 }
