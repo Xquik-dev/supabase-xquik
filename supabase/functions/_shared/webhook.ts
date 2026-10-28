@@ -44,7 +44,7 @@ export function parseSecrets(value: string | undefined): readonly string[] {
 }
 
 function hexBytes(hex: string): Uint8Array<ArrayBuffer> {
-  return Uint8Array.from(hex.match(/../g) ?? [], (pair) => parseInt(pair, 16));
+  return Uint8Array.from({ length: hex.length / 2 }, (_, index) => parseInt(hex.slice(index * 2, index * 2 + 2), 16));
 }
 
 async function signedByAny(
