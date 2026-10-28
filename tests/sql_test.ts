@@ -306,7 +306,7 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
     await sql`select xquik.enqueue('getAccount')`;
     assertEquals(await sql`select xquik.collect() as finished`, [{ finished: 5 }]);
     assertEquals(
-      await sql`select status, http_status as code, response, finished_at is not null as finished
+      await sql`select status, http_status::integer as code, response, finished_at is not null as finished
         from public.xquik_actions order by id`,
       [
         { status: "succeeded", code: 200, response: { ok: true }, finished: true },
