@@ -80,17 +80,17 @@ const fakeFetch: typeof fetch = async (input, init) => {
   return await Promise.resolve(Response.json({ _meta: {}, results: [] }));
 };
 
-function placeholderField(target: object, key: string | symbol): unknown {
+function placeholderField(target: Record<symbol, unknown>, key: string | symbol): unknown {
   if (key === Symbol.toPrimitive) {
     return () => "placeholder";
   }
   if (typeof key === "string") {
     return "placeholder";
   }
-  return Reflect.get(target, key);
+  return target[key];
 }
 
-const placeholder: object = new Proxy({}, { get: placeholderField });
+const placeholder: object = new Proxy<Record<symbol, unknown>>({}, { get: placeholderField });
 
 type Resource = APIResource & Record<string, unknown>;
 

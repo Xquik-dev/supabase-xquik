@@ -59,7 +59,7 @@ function described({ hint, message }: DatabaseError): Failure {
 }
 
 async function sequence<Item, Result>(
-  items: Iterator<Item, unknown>,
+  items: Iterator<Item, unknown, unknown>,
   each: (item: Item) => Promise<Result>,
   results: Result[],
 ): Promise<Result[]> {

@@ -12,8 +12,9 @@ function isMigrationName(name: string): boolean {
   return !Number.isNaN(Date.parse(iso)) && new Date(iso).toISOString() === iso;
 }
 
-Deno.test("each migration is named <UTC timestamp>_<snake_case>.sql", async () => {
-  const names = await Array.fromAsync(Deno.readDir("supabase/migrations"), (entry) => entry.name);
-  const misnamed = names.filter((name) => !isMigrationName(name)).toSorted();
+const MIGRATION_NAMES = [...Deno.readDirSync("supabase/migrations")].map((entry) => entry.name);
+
+Deno.test("each migration is named <UTC timestamp>_<snake_case>.sql", () => {
+  const misnamed = MIGRATION_NAMES.filter((name) => !isMigrationName(name)).toSorted();
   assertEquals(misnamed, []);
 });

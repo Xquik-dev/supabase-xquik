@@ -1,4 +1,5 @@
 import type { Mutant } from "./mutants.ts";
+import readDir from "./read_dir.ts";
 
 type Outcome = "killed" | "survived" | "invalid";
 interface Result {
@@ -25,7 +26,7 @@ const SCORE_DECIMALS = 2;
 
 async function copyTree(from: string, to: string): Promise<void> {
   await Deno.mkdir(to, { recursive: true });
-  const entries = await Array.fromAsync(Deno.readDir(from));
+  const entries = await Array.fromAsync(readDir(from));
   await Promise.all(entries.map(async (entry): Promise<void> => {
     const source = `${from}/${entry.name}`;
     const target = `${to}/${entry.name}`;

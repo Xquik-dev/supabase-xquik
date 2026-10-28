@@ -10,6 +10,7 @@ import { FOREIGN_TABLES_SUFFIX, renderForeignTables } from "@/scripts/foreign_ta
 import { latestMigration, readGeneration, REGISTRY_SUFFIX, renderMigration, SPEC_PATH } from "@/scripts/generate.ts";
 import parseJson from "@shared/json.ts";
 import { publicOperations } from "@/scripts/openapi.ts";
+import readDir from "@/scripts/read_dir.ts";
 import { z } from "zod";
 
 const FAILED = 1;
@@ -122,6 +123,6 @@ Deno.test("deno task generate stops when it cannot read the migrations, so it wr
   const output = await runGenerate(root, SPEC_PATH);
   assertEquals(output.code, FAILED);
   assertStringIncludes(new TextDecoder().decode(output.stderr), 'Requires read access to "supabase/migrations"');
-  const names = await Array.fromAsync(Deno.readDir(`${root}/${MIGRATIONS}`), (entry) => `${MIGRATIONS}/${entry.name}`);
+  const names = await Array.fromAsync(readDir(`${root}/${MIGRATIONS}`), (entry) => `${MIGRATIONS}/${entry.name}`);
   assertEquals(names, [latest]);
 });

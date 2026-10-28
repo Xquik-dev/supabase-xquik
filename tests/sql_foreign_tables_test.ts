@@ -2,6 +2,7 @@ import { assertEquals, assertExists } from "@std/assert";
 import { latestMigration, SPEC_PATH } from "@/scripts/generate.ts";
 import type { Row, Sql, SqlStep } from "@/tests/postgres.ts";
 import { FOREIGN_TABLES_SUFFIX } from "@/scripts/foreign_tables.ts";
+import parseJson from "@shared/json.ts";
 import { securityRequirements } from "@/scripts/openapi.ts";
 import { z } from "zod";
 
@@ -18,7 +19,7 @@ const PLACEHOLDER = /\{(?<name>[^}]+)\}/gu;
 const getOperation = z.object({ operationId: z.string(), security: securityRequirements.optional() });
 const pathItem = z.object({ get: getOperation.optional() });
 const spec = z.object({ paths: z.record(z.string(), pathItem), security: securityRequirements }).parse(
-  JSON.parse(await Deno.readTextFile(SPEC_PATH)),
+  parseJson(await Deno.readTextFile(SPEC_PATH)),
 );
 const catalogTable = z.object({
   columns: z.array(z.string()),
