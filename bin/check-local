@@ -85,7 +85,7 @@ run_check() {
   [[ -z "${label}" ]] || passed+=("${label}")
 }
 
-run_check "install" "Install the locked Deno and squawk versions" \
+run_check "" "Install the locked Deno and squawk versions" \
   "Install Bun and check network access, or update bun.lock, then rerun." \
   bun install --frozen-lockfile
 deno=node_modules/.bin/deno
@@ -171,9 +171,9 @@ run_codeql() {
   mkdir "${source}" &&
     git ls-files -z --cached --others --exclude-standard | tar --null -T - -cf - | tar -xf - -C "${source}" &&
     codeql database create "${database}" --language=javascript --build-mode=none --source-root="${source}" \
-      --threads=0 >/dev/null &&
+      --threads=0 --quiet >/dev/null &&
     codeql database analyze "${database}" codeql/javascript-queries:codeql-suites/javascript-security-extended.qls \
-      --download --format=sarif-latest --output="${results}" --threads=0 >/dev/null || return
+      --download --format=sarif-latest --output="${results}" --threads=0 --quiet >/dev/null || return
   jq -e --arg id "${diagnostic}" 'any(.runs[].tool["driver"].notifications[]?; .id == $id)' "${results}" >/dev/null || {
     echo "The CodeQL suite did not run ${diagnostic}, so the scan cannot show that it read every file." >&2
     return 1
@@ -200,7 +200,7 @@ lint_sql() {
   git ls-files -z -- '*.sql' | xargs -0 -r node_modules/.bin/squawk --assume-in-transaction
 }
 
-run_check "banned patterns" "Suppression and exclusion ban" \
+run_check "bans" "Suppression and exclusion ban" \
   "Remove each suppression or exclusion listed above and fix what it hid." no_banned_patterns
 run_check "config" "Exclusion keys in deno.json" "Remove the keys listed above." no_config_exclusions
 run_check "shellcheck" "Shell lint with every optional shellcheck check" "Fix the shellcheck findings above." lint_shell
