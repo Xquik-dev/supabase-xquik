@@ -95,7 +95,9 @@ Deno.test("the gateway script serves its JSON config and stops on SIGTERM", asyn
         headers: { apikey: KEYS.publishable },
       })
         .catch(async () => {
-          await new Promise((resolve) => setTimeout(resolve, 100));
+          await new Promise((resolve) => {
+            setTimeout(resolve, 100);
+          });
           return undefined;
         });
     }

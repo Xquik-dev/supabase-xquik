@@ -37,6 +37,8 @@ if (import.meta.main) {
   const [json] = z.tuple([z.string()]).parse(Deno.args);
   const parsed = config.parse(JSON.parse(json));
   const stop = new AbortController();
-  Deno.addSignalListener("SIGTERM", () => stop.abort());
+  Deno.addSignalListener("SIGTERM", () => {
+    stop.abort();
+  });
   Deno.serve({ hostname: "127.0.0.1", port: parsed.port, signal: stop.signal, onListen: () => {} }, gateway(parsed));
 }
