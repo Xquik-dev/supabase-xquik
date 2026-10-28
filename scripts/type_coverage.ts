@@ -12,7 +12,6 @@ export type Report = {
 const REMOTE_ROOT = "/deno-remote/";
 const DENO_TYPES = "/deno-types/lib.deno.d.ts";
 const SITE_TEXT = 80;
-const SET_PARENT_NODES = true;
 const LITERALS = new Set([
   ts.SyntaxKind.StringLiteral,
   ts.SyntaxKind.NumericLiteral,
@@ -100,13 +99,11 @@ function compilerHost(options: ts.CompilerOptions, graph: Graph, denoTypes: stri
   };
   return {
     ...host,
-    fileExists: (fileName) => virtual(fileName) !== undefined || host.fileExists(fileName),
-    readFile: (fileName) => virtual(fileName) ?? host.readFile(fileName),
     getSourceFile: (fileName, languageVersion) => {
       const text = virtual(fileName);
       return text === undefined
         ? host.getSourceFile(fileName, languageVersion)
-        : ts.createSourceFile(fileName, text, languageVersion, SET_PARENT_NODES, ts.ScriptKind.TS);
+        : ts.createSourceFile(fileName, text, languageVersion, undefined, ts.ScriptKind.TS);
     },
     resolveModuleNameLiterals: (literals, containingFile) =>
       literals.map((literal) => resolve(literal.text, containingFile)),
@@ -197,8 +194,6 @@ export async function typeCoverage(root: string, files: readonly string[]): Prom
     target: ts.ScriptTarget.ESNext,
     module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler,
-    allowImportingTsExtensions: true,
-    noEmit: true,
     types: [],
   };
   const paths = files.map((file) => `${root}/${file}`);

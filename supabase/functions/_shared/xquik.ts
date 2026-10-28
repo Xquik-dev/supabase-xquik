@@ -57,9 +57,8 @@ export async function askDocs(
   const body: unknown = await response.json();
   if (!response.ok) {
     const parsed = failure.safeParse(body);
-    throw new Error(
-      `Xquik docs search returned HTTP ${String(response.status)}. ${parsed.success ? parsed.data.error.message : ""}`,
-    );
+    const status = `Xquik docs search returned HTTP ${String(response.status)}.`;
+    throw new Error(parsed.success ? `${status} ${parsed.data.error.message}` : status);
   }
   return answer.parse(body);
 }

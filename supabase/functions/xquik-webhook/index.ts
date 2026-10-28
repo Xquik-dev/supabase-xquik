@@ -42,8 +42,7 @@ const store: DeliveryStore = {
   },
 };
 
-async function onEvent(event: MonitorEvent): Promise<void> {
-  await Promise.resolve();
+function onEvent(event: MonitorEvent): void {
   console.log(`xquik-webhook stored ${event.eventType} event ${event.streamEventId}.`);
 }
 
@@ -53,7 +52,7 @@ Deno.serve(async (request) =>
     now: Date.now,
     store,
     after: (event) => {
-      EdgeRuntime.waitUntil(onEvent(event));
+      EdgeRuntime.waitUntil(Promise.resolve(event).then(onEvent));
     },
   })
 );

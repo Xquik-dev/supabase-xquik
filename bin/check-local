@@ -361,14 +361,15 @@ tests_passed="$(sed -nE 's/^ok \| ([0-9]+) passed.*/\1/p' "${workspace}/tests.lo
 run_check "CodeQL" "Static analysis with the CodeQL security-extended queries" \
   "Fix the CodeQL findings above, then rerun." run_codeql
 
-mutation_minimum="81.34"
+mutation_minimum="100"
 
 mutation_tests() {
   local listing files=()
   listing="$(git ls-files --cached --others --exclude-standard -- '*.ts' 'supabase/migrations/*.sql' \
     ':(exclude)*_test.ts' ':(exclude)*.d.ts')" || return
   mapfile -t files <<<"${listing}"
-  "${deno}" run --allow-read --allow-write --allow-run --allow-env scripts/mutate.ts "${mutation_minimum}" "${files[@]}"
+  "${deno}" run --allow-read --allow-write --allow-run --allow-env scripts/mutate.ts "${mutation_minimum}" \
+    scripts/equivalent_mutants.json "${files[@]}"
 }
 
 run_check "mutation score ${mutation_minimum}%" "Mutation tests of every TypeScript source and SQL function" \

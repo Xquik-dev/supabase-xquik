@@ -7,9 +7,7 @@ const MIGRATIONS = "supabase/migrations";
 export const REGISTRY_SUFFIX = "_xquik_operations.sql";
 
 function migrationFiles(): string[] {
-  return Deno.readDirSync(MIGRATIONS).map((entry) => `${MIGRATIONS}/${entry.name}`).filter((path) =>
-    path.endsWith(".sql")
-  ).toArray().toSorted();
+  return Deno.readDirSync(MIGRATIONS).map((entry) => `${MIGRATIONS}/${entry.name}`).toArray().toSorted();
 }
 
 export function latestMigration(suffix: string): string | undefined {
