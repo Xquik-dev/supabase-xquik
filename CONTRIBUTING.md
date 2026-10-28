@@ -10,6 +10,8 @@ deno task test
 `bin/check-local` installs the Deno version that `bun.lock` pins, then runs
 both tasks. Run it before you open a pull request.
 
+The SQL tests start a throwaway cluster, so they need the Postgres 18 `initdb` and `pg_ctl` on your PATH.
+
 ## Stack tests
 
 The stack tests need a running local project.

@@ -1,0 +1,4 @@
+comment = 'Stand-in for wrappers that accepts Wasm foreign data wrappers, servers and foreign tables'
+default_version = '1.0'
+relocatable = false
+schema = extensions
