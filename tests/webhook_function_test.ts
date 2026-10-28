@@ -4,6 +4,7 @@ import { post, randomNonce, sampleEvent, SECRET, signDelivery, TEST_ALERT } from
 const FUNCTION = new URL("../supabase/functions/xquik-webhook/index.ts", import.meta.url);
 const SERVICE_ROLE_KEY = "service-role-key";
 const STORE_DOWN = "store-down";
+const BARE_EVENT = { eventType: "tweet.new", streamEventId: "9002", occurredAt: "2026-10-28T19:00:00Z" };
 
 type Handler = (request: Request) => Promise<Response>;
 type Received = { readonly table: string; readonly apiKey: string | null; readonly body: unknown };
@@ -86,14 +87,16 @@ Deno.test("the xquik-webhook function stores each event once through PostgREST a
       (await handle(await signedPost(event, STORE_DOWN))).status,
       (await handle(await signedPost(sampleEvent("tweet.new", { streamEventId: STORE_DOWN })))).status,
       (await handle(new Request("http://localhost/functions/v1/xquik-webhook"))).status,
+      (await handle(await signedPost(BARE_EVENT))).status,
     ];
     await Promise.all(waits);
-    assertEquals(statuses, [200, 200, 401, 200, 503, 503, 405]);
-    assertEquals(waits.length, 1);
+    assertEquals(statuses, [200, 200, 401, 200, 503, 503, 405, 200]);
+    assertEquals(waits.length, 2);
     assertEquals(logs, [
       "log xquik-webhook stored tweet.new event 9001.",
       "error xquik-webhook could not record the nonce. The store is down.",
       "error xquik-webhook could not store the event. The store is down.",
+      "log xquik-webhook stored tweet.new event 9002.",
     ]);
     assertEquals(new Set(postgrest.received.map((request) => request.apiKey)), new Set([SERVICE_ROLE_KEY]));
     assertEquals(postgrest.received.map((request) => request.table), [
@@ -106,7 +109,17 @@ Deno.test("the xquik-webhook function stores each event once through PostgREST a
       "xquik_webhook_nonces",
       "xquik_webhook_nonces",
       "xquik_events",
+      "xquik_webhook_nonces",
+      "xquik_events",
     ]);
+    assertEquals(postgrest.received.at(-1)?.body, {
+      stream_event_id: "9002",
+      delivery_id: null,
+      event_type: "tweet.new",
+      monitor_id: null,
+      occurred_at: BARE_EVENT.occurredAt,
+      payload: BARE_EVENT,
+    });
     assertEquals(postgrest.received[1]?.body, {
       stream_event_id: "9001",
       delivery_id: "502",

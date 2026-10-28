@@ -1,4 +1,4 @@
-import { assertEquals, assertFalse } from "@std/assert";
+import { assertEquals, assertFalse, assertThrows } from "@std/assert";
 import { handleDelivery, parseSecrets, verifyDelivery } from "../supabase/functions/_shared/webhook.ts";
 import {
   memoryStore,
@@ -115,8 +115,26 @@ Deno.test("stores event types it has never seen", async () => {
 
 Deno.test("acks a signed body that is not an event without storing it", async () => {
   const { events, store } = memoryStore();
-  assertEquals((await handleDelivery(post(await signDelivery("not json")), receiver(store).deps)).status, 200);
+  for (const body of ["not json", JSON.stringify({ eventType: "tweet.new" })]) {
+    assertEquals((await handleDelivery(post(await signDelivery(body)), receiver(store).deps)).status, 200, body);
+  }
   assertEquals(events.size, 0);
+});
+
+Deno.test("rejects a delivery without its timestamp, nonce or signature header", async () => {
+  const headers = ["x-xquik-timestamp", "x-xquik-nonce", "x-xquik-signature"];
+  const reasons = await Promise.all(headers.map(async (header) => {
+    const signed = await signDelivery(EVENT);
+    signed.headers.delete(header);
+    return reason(signed);
+  }));
+  assertEquals(reasons, ["stale", "signature", "signature"]);
+});
+
+Deno.test("refuses to start without a webhook secret", () => {
+  for (const value of [undefined, "", " , "]) {
+    assertThrows(() => parseSecrets(value), Error, "Set XQUIK_WEBHOOK_SECRET");
+  }
 });
 
 Deno.test("accepts deliveries signed with any configured secret", async () => {
