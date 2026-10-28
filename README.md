@@ -94,7 +94,7 @@ select xquik.schedule('nasa-tweets', '*/15 * * * *', 'getUserTweets', '{"id": "N
 
 ## Run actions from rows
 
-Insert a row into `public.xquik_actions` from your app, a trigger or a Database Webhook. pg_net sends it after your transaction commits. The `xquik-collect` cron job saves the answer within 10 seconds.
+Insert a row into `public.xquik_actions` from your app, a trigger or a Database Webhook. pg_net sends it after your transaction commits. The `xquik-collect` cron job copies finished answers every 10 seconds.
 
 ```sql
 select xquik.enqueue('getUser', '{"id": "NASA"}');
