@@ -1,20 +1,10 @@
-import {
-  assertEquals,
-  assertExists,
-  assertMatch,
-  assertNotEquals,
-  assertStringIncludes,
-  assertThrows,
-} from "@std/assert";
+import { assertEquals, assertExists, assertLess, assertMatch, assertStringIncludes, assertThrows } from "@std/assert";
 import { z } from "zod";
-import { FOREIGN_TABLES_SUFFIX, foreignTables, renderForeignTables } from "../scripts/foreign_tables.ts";
-import { latestMigration, operationRows, REGISTRY_SUFFIX, renderMigration, SPEC_PATH } from "../scripts/generate.ts";
+import { FOREIGN_TABLES_SUFFIX, renderForeignTables } from "../scripts/foreign_tables.ts";
+import { latestMigration, readGeneration, REGISTRY_SUFFIX, renderMigration, SPEC_PATH } from "../scripts/generate.ts";
 import { publicOperations } from "../scripts/openapi.ts";
 
-const root: unknown = JSON.parse(await Deno.readTextFile(SPEC_PATH));
-const operations = publicOperations(root);
-const rows = operationRows(operations);
-const tables = foreignTables(operations);
+const { rows, tables } = await readGeneration();
 
 Deno.test("the latest registry & foreign table migrations match a fresh generation from openapi.json", async () => {
   const fresh = { [REGISTRY_SUFFIX]: renderMigration(rows), [FOREIGN_TABLES_SUFFIX]: renderForeignTables(tables) };
@@ -47,13 +37,34 @@ Deno.test("list_field names the required array that every success shape shares",
   );
 });
 
-Deno.test("publicOperations names a broken reference in openapi.json", () => {
+function referring(info: unknown, $ref: string): unknown {
+  return {
+    security: [{ apiKey: [] }],
+    info,
+    paths: { "/x": { get: { operationId: "getX", responses: { "200": { $ref } } } } },
+  };
+}
+
+Deno.test("publicOperations names a broken reference in openapi.json, also one that passes through null", () => {
+  for (const [info, $ref] of [[{ title: "Xquik" }, "#/info/title/deeper"], [null, "#/info/deeper"]] as const) {
+    assertThrows(() => publicOperations(referring(info, $ref)), Error, `openapi.json has a broken reference ${$ref}`);
+  }
+});
+
+Deno.test("publicOperations decodes escaped references, keeps outside ones as they are and sorts equal ids stably", () => {
+  const session = { name: "session", in: "cookie", schema: { $ref: "https://example.com/session.json" } };
   const spec = {
     security: [{ apiKey: [] }],
-    info: { title: "Xquik" },
-    paths: { "/x": { get: { operationId: "getX", responses: { "200": { $ref: "#/info/title/deeper" } } } } },
+    components: { parameters: { "a~b/c": session } },
+    paths: {
+      "/b": { get: { operationId: "same", parameters: [{ $ref: "#/components/parameters/a~0b~1c" }], responses: {} } },
+      "/a": { get: { operationId: "same", responses: {} } },
+    },
   };
-  assertThrows(() => publicOperations(spec), Error, "openapi.json has a broken reference #/info/title/deeper");
+  assertEquals(publicOperations(spec).map(({ path, parameters }) => ({ path, parameters })), [
+    { path: "/b", parameters: [{ name: "session", in: "cookie", type: null, enum: [] }] },
+    { path: "/a", parameters: [] },
+  ]);
 });
 
 Deno.test("deno task generate writes each migration once under its own stamp & reuses both while openapi.json stays the same", async () => {
@@ -90,14 +101,20 @@ Deno.test("deno task generate writes each migration once under its own stamp & r
   ]);
   assertMatch(registry.file, /^supabase\/migrations\/\d{14}_xquik_operations\.sql$/);
   assertMatch(foreign.file, /^supabase\/migrations\/\d{14}_xquik_foreign_tables\.sql$/);
-  assertNotEquals(
-    registry.file.match(/\d{14}/)?.[0],
-    foreign.file.match(/\d{14}/)?.[0],
-    "Supabase keys each migration by its stamp, so 2 migrations in 1 run need 2 stamps",
+  assertLess(
+    registry.file.replace(REGISTRY_SUFFIX, ""),
+    foreign.file.replace(FOREIGN_TABLES_SUFFIX, ""),
+    "Supabase applies migrations in stamp order, so the registry needs an earlier stamp than the foreign tables",
   );
   assertEquals(await Deno.readTextFile(`${dir}/${registry.file}`), renderMigration(rows));
   assertEquals(await Deno.readTextFile(`${dir}/${foreign.file}`), renderForeignTables(tables));
+  const written = new Date("2026-01-01T00:00:00.000Z");
+  for (const { file } of first) await Deno.utime(`${dir}/${file}`, written, written);
   assertEquals(await generate(), [{ ...registry, changed: false }, { ...foreign, changed: false }]);
+  const times = await Promise.all(
+    first.map(async ({ file }) => (await Deno.stat(`${dir}/${file}`)).mtime?.toISOString()),
+  );
+  assertEquals(times, ["2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z"]);
   await Deno.remove(dir, { recursive: true });
 });
 

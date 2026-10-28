@@ -31,7 +31,7 @@ function foreignTable({ operationId, path, parameters, json, listField }: Operat
     ...parameters.filter((p) => p.in === "query" && p !== format),
   ];
   const cursorParam = CURSOR_PARAMS.find((name) => parameters.some((p) => p.in === "query" && p.name === name));
-  const cursorField = CURSOR_FIELDS.find((name) => json !== undefined && json.properties.has(name));
+  const cursorField = CURSOR_FIELDS.find((name) => json?.properties.has(name) === true);
   return [{
     operationId,
     table: operationId.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),

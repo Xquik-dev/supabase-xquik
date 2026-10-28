@@ -1,9 +1,11 @@
 import { assert, assertArrayIncludes, assertEquals, assertExists, assertMatch, assertNotMatch } from "@std/assert";
-import pg, { DatabaseError } from "pg";
+import { Client, DatabaseError } from "pg";
 import { z } from "zod";
+import { securityRequirements } from "../scripts/openapi.ts";
+import { withoutEmptyKinds } from "../scripts/types.ts";
 import { FOREIGN_TABLES_SUFFIX } from "../scripts/foreign_tables.ts";
 import { latestMigration, REGISTRY_SUFFIX, SPEC_PATH } from "../scripts/generate.ts";
-import "../supabase/functions/_shared/database.types.ts";
+import { Constants } from "../supabase/functions/_shared/database.types.ts";
 
 type Row = Record<string, unknown>;
 type Reply = readonly [status: number, type: string | null, content: string | null];
@@ -39,12 +41,11 @@ const PGTAP_SHA256 = "2570574a9321082e82433768feb5bffe472ef2ced6b22608a86bfd25f2
 const PROVE = ["--norc", "--failures", "--comments", "--directives", "--recurse", "--ext=.sql", "--ext=.pg"];
 const PSQL = "psql --no-psqlrc --no-align --quiet --tuples-only --pset=pager=off --set=ON_ERROR_STOP=1 --file";
 
-const security = z.array(z.record(z.string(), z.unknown()));
 const spec = z.object({
-  security,
+  security: securityRequirements,
   paths: z.record(
     z.string(),
-    z.object({ get: z.object({ operationId: z.string(), security: security.optional() }).optional() }),
+    z.object({ get: z.object({ operationId: z.string(), security: securityRequirements.optional() }).optional() }),
   ),
 }).parse(JSON.parse(await Deno.readTextFile(SPEC_PATH)));
 const publicGets = Object.entries(spec.paths).flatMap(([path, { get }]) =>
@@ -92,8 +93,17 @@ async function startCluster(dir: string): Promise<void> {
   const data = `${dir}/data`;
   const pgtap = await buildPgtap(dir);
   await run("initdb", [
-    ...["-D", data, "-U", "postgres", "-A", "trust", "-E", "UTF8"],
-    ...["--locale=C", "--no-sync", "--no-instructions"],
+    "-D",
+    data,
+    "-U",
+    "postgres",
+    "-A",
+    "trust",
+    "-E",
+    "UTF8",
+    "--locale=C",
+    "--no-sync",
+    "--no-instructions",
   ]);
   const standIns = await Deno.realPath("tests/sql");
   const settings = [
@@ -108,7 +118,7 @@ async function startCluster(dir: string): Promise<void> {
   });
 }
 
-async function query(client: pg.Client, text: string, values: unknown[] = []): Promise<Row[]> {
+async function query(client: Client, text: string, values: unknown[] = []): Promise<Row[]> {
   return (await client.query<Row, unknown[]>(text, values)).rows;
 }
 
@@ -118,17 +128,17 @@ async function latestSql(suffix: string): Promise<string> {
   return await Deno.readTextFile(file);
 }
 
-async function applyMigrations(client: pg.Client, url: string): Promise<void> {
+async function applyMigrations(client: Client, url: string): Promise<void> {
   await query(client, await Deno.readTextFile("tests/sql/supabase.sql"));
   await run(SUPABASE, ["migration", "up", "--db-url", url], { XQUIK_API_KEY: KEY["x-api-key"] });
 }
 
-async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<void> {
-  const sql = (strings: TemplateStringsArray, ...values: unknown[]): Promise<Row[]> =>
-    query(client, strings.reduce((text, part, index) => `${text}$${index}${part}`), values);
+async function testFunctions(t: Deno.TestContext, client: Client): Promise<void> {
+  const sql = async (strings: TemplateStringsArray, ...values: unknown[]): Promise<Row[]> =>
+    await query(client, strings.reduce((text, part, index) => `${text}$${String(index)}${part}`), values);
 
-  const step = (name: string, body: () => Promise<void>): Promise<boolean> =>
-    t.step(name, async (): Promise<void> => {
+  const step = async (name: string, body: () => Promise<void>): Promise<boolean> =>
+    await t.step(name, async (): Promise<void> => {
       await sql`begin`;
       try {
         await body();
@@ -149,8 +159,8 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
     await sql`insert into extensions.http_replies (status, content_type, content) values (${status}, ${type}, ${content})`;
   };
 
-  const httpCalls = (): Promise<Row[]> =>
-    sql`select (c.request).method, (c.request).uri as url,
+  const httpCalls = async (): Promise<Row[]> =>
+    await sql`select (c.request).method, (c.request).uri as url,
         (select jsonb_object_agg(h.field, h.value) from unnest((c.request).headers) h) as headers,
         (c.request).content_type as type, (c.request).content::jsonb as body, c.curlopts
       from extensions.http_calls c order by c.id`;
@@ -207,10 +217,10 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
     async () => {
       assertEquals(
         [
-          await failure(() => sql`select xquik.call('nope')`),
-          await failure(() => sql`select xquik.call('getAccount', '[]')`),
-          await failure(() => sql`select xquik.call('getUser', '{}')`),
-          await failure(() => sql`select xquik.call('getUser', '{"id": null}')`),
+          await failure(async () => await sql`select xquik.call('nope')`),
+          await failure(async () => await sql`select xquik.call('getAccount', '[]')`),
+          await failure(async () => await sql`select xquik.call('getUser', '{}')`),
+          await failure(async () => await sql`select xquik.call('getUser', '{"id": null}')`),
         ],
         [
           {
@@ -228,9 +238,9 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
   await step("xquik.call raises with a Vault hint when the xquik_api_key secret is empty or missing", async () => {
     await reply(200, "application/json", "{}");
     await sql`update vault.secrets set secret = '' where name = 'xquik_api_key'`;
-    const empty = await failure(() => sql`select xquik.call('getAccount')`);
+    const empty = await failure(async () => await sql`select xquik.call('getAccount')`);
     await sql`delete from vault.secrets where name = 'xquik_api_key'`;
-    const missing = await failure(() => sql`select xquik.call('getAccount')`);
+    const missing = await failure(async () => await sql`select xquik.call('getAccount')`);
     const expected = {
       message: "The xquik_api_key Vault secret is missing",
       hint: "Run select vault.create_secret('<your key>', 'xquik_api_key').",
@@ -269,7 +279,7 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
     ];
     for (const [sent, expected] of failures) {
       await reply(...sent);
-      assertEquals(await failure(() => sql`select xquik.call('getAccount')`), {
+      assertEquals(await failure(async () => await sql`select xquik.call('getAccount')`), {
         message: `Xquik getAccount returned ${expected}`,
       });
     }
@@ -345,8 +355,8 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
     const hint = "Run it with select xquik.call(...) instead.";
     assertEquals(
       [
-        await failure(() => sql`select xquik.enqueue('updateAccount')`),
-        await failure(() => sql`select xquik.enqueue('saveStyle', '{"id": "1"}')`),
+        await failure(async () => await sql`select xquik.enqueue('updateAccount')`),
+        await failure(async () => await sql`select xquik.enqueue('saveStyle', '{"id": "1"}')`),
       ],
       [
         { message: "Xquik operation updateAccount uses PATCH, and pg_net sends only GET, POST and DELETE", hint },
@@ -385,8 +395,8 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
   await step("xquik.schedule checks the operation, then schedules a job that enqueues it", async () => {
     assertEquals(
       [
-        await failure(() => sql`select xquik.schedule('job', '* * * * *', 'nope')`),
-        await failure(() => sql`select xquik.schedule('job', '* * * * *', 'updateAccount')`),
+        await failure(async () => await sql`select xquik.schedule('job', '* * * * *', 'nope')`),
+        await failure(async () => await sql`select xquik.schedule('job', '* * * * *', 'updateAccount')`),
       ].map(({ message }) => message),
       [
         "Unknown Xquik operation nope",
@@ -457,7 +467,7 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
           read: read?.["n"],
           changed: await count(`update ${table.name} set ${table.column} = ${table.column}`),
           removed: await count(`delete from ${table.name}`),
-          added: (await failure(() => query(client, `insert into ${table.name} ${table.row}`))).message,
+          added: (await failure(async () => await query(client, `insert into ${table.name} ${table.row}`))).message,
         });
         await sql`reset role`;
       }
@@ -471,7 +481,7 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
           read: 0,
           changed: 0,
           removed: 0,
-          added: `new row violates row-level security policy for table "${table.name.split(".")[1]}"`,
+          added: `new row violates row-level security policy for table "${String(table.name.split(".")[1])}"`,
         }))
       ),
     );
@@ -531,17 +541,17 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
         from pg_foreign_table t join pg_class c on c.oid = t.ftrelid
         where c.relnamespace = 'xquik'::regnamespace order by c.relname`,
     );
-  const oids = (): Promise<Row[]> =>
-    sql`select relname as name, oid from pg_class
+  const oids = async (): Promise<Row[]> =>
+    await sql`select relname as name, oid from pg_class
       where relnamespace = 'xquik'::regnamespace and relkind = 'f' order by relname`;
 
   await step(
     "every public GET operation that answers with JSON has a foreign table on its path with its path parameters",
     async () => {
       const tables = new Map((await foreignTables()).map((table) => [table.name, table]));
-      console.log(`${tables.size} of ${publicGets.length} public GET operations have a foreign table.`);
+      console.log(`${String(tables.size)} of ${String(publicGets.length)} public GET operations have a foreign table.`);
       assertEquals(NO_JSON_ANSWER.filter((id) => publicGets.some((read) => read.id === id)), NO_JSON_ANSWER);
-      assertEquals([...tables.keys()].sort(), readable.map(({ table }) => table).sort());
+      assertEquals([...tables.keys()].toSorted(), readable.map(({ table }) => table).toSorted());
       for (const { table: name, path } of readable) {
         const table = tables.get(name);
         assertEquals(table?.options["endpoint"]?.split("?")[0], path, name);
@@ -607,7 +617,7 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
     const fresh = await foreignTables();
     await sql`create view public.nasa_posts as select attrs from xquik.search_tweets where q = 'NASA'`;
     await sql`alter foreign table xquik.search_tweets options (set endpoint '/old')`;
-    assertEquals(await failure(() => query(client, foreignTablesMigration)), {
+    assertEquals(await failure(async () => await query(client, foreignTablesMigration)), {
       message: "cannot drop foreign table xquik.search_tweets because other objects depend on it",
       hint: "Use DROP ... CASCADE to drop the dependent objects too.",
     });
@@ -627,7 +637,7 @@ async function formatted(source: string): Promise<string> {
   return new TextDecoder().decode(stdout);
 }
 
-async function testPgtap(t: Deno.TestContext, client: pg.Client, dir: string): Promise<void> {
+async function testPgtap(t: Deno.TestContext, client: Client, dir: string): Promise<void> {
   await t.step("every pgTAP test passes with no skip or todo, and each file runs exactly its plan", async () => {
     await query(client, "create extension pgtap with schema extensions");
     try {
@@ -644,7 +654,7 @@ async function testPgtap(t: Deno.TestContext, client: pg.Client, dir: string): P
   });
 }
 
-async function testCli(t: Deno.TestContext, client: pg.Client, url: string): Promise<void> {
+async function testCli(t: Deno.TestContext, client: Client, url: string): Promise<void> {
   await t.step("the Supabase advisors report nothing at any level", async () => {
     await query(client, "select pg_stat_force_next_flush()");
     await run(SUPABASE, ["db", "advisors", "--db-url", url, "--type", "all", "--level", "info", "--fail-on", "info"]);
@@ -652,7 +662,12 @@ async function testCli(t: Deno.TestContext, client: pg.Client, url: string): Pro
 
   await t.step(`${TYPES} matches supabase gen types for the public schema`, async () => {
     const generated = await run(SUPABASE, ["gen", "types", "typescript", "--db-url", url, "--schema", "public"]);
-    assertEquals(await Deno.readTextFile(TYPES), await formatted(generated), "Run deno task types.");
+    assertEquals(
+      await Deno.readTextFile(TYPES),
+      await formatted(withoutEmptyKinds(await formatted(generated))),
+      "Run deno task types.",
+    );
+    assertEquals(Constants, { public: { Enums: {} } }, "the public schema defines no enum types");
   });
 
   await t.step("rerunning the index migration rebuilds an index that a failed build left invalid", async () => {
@@ -674,7 +689,7 @@ Deno.test("the SQL functions and triggers on a throwaway Postgres 18 cluster", a
   try {
     await startCluster(dir);
     try {
-      const client = new pg.Client({ host: dir, user: "postgres", database: "postgres" });
+      const client = new Client({ host: dir, user: "postgres", database: "postgres" });
       const url = `postgresql://localhost/postgres?user=postgres&host=${encodeURIComponent(dir)}`;
       await client.connect();
       try {

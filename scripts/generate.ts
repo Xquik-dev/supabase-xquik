@@ -1,4 +1,4 @@
-import { FOREIGN_TABLES_SUFFIX, foreignTables, renderForeignTables } from "./foreign_tables.ts";
+import { FOREIGN_TABLES_SUFFIX, type ForeignTable, foreignTables, renderForeignTables } from "./foreign_tables.ts";
 import { type Method, type Operation, publicOperations } from "./openapi.ts";
 import { literal } from "./sql.ts";
 
@@ -7,9 +7,7 @@ const MIGRATIONS = "supabase/migrations";
 export const REGISTRY_SUFFIX = "_xquik_operations.sql";
 
 function migrationFiles(): string[] {
-  return Deno.readDirSync(MIGRATIONS).map((entry) => `${MIGRATIONS}/${entry.name}`).filter((path) =>
-    path.endsWith(".sql")
-  ).toArray().sort();
+  return Deno.readDirSync(MIGRATIONS).map((entry) => `${MIGRATIONS}/${entry.name}`).toArray().toSorted();
 }
 
 export function latestMigration(suffix: string): string | undefined {
@@ -24,7 +22,7 @@ export type OperationRow = {
   readonly listField: string | null;
 };
 
-export function operationRows(operations: readonly Operation[]): OperationRow[] {
+function operationRows(operations: readonly Operation[]): OperationRow[] {
   return operations.map(({ operationId, method, path, listField }): OperationRow => ({
     operationId,
     method,
@@ -57,11 +55,13 @@ set method = excluded.method,
 `;
 }
 
+export async function readGeneration(): Promise<{ rows: OperationRow[]; tables: ForeignTable[] }> {
+  const operations = publicOperations(JSON.parse(await Deno.readTextFile(SPEC_PATH)));
+  return { rows: operationRows(operations), tables: foreignTables(operations) };
+}
+
 if (import.meta.main) {
-  const root: unknown = JSON.parse(await Deno.readTextFile(SPEC_PATH));
-  const operations = publicOperations(root);
-  const rows = operationRows(operations);
-  const tables = foreignTables(operations);
+  const { rows, tables } = await readGeneration();
   const migrations = [
     { count: { operations: rows.length }, suffix: REGISTRY_SUFFIX, sql: renderMigration(rows) },
     { count: { foreignTables: tables.length }, suffix: FOREIGN_TABLES_SUFFIX, sql: renderForeignTables(tables) },

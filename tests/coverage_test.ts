@@ -2,13 +2,13 @@ import { latestMigration, REGISTRY_SUFFIX } from "../scripts/generate.ts";
 import { assertEquals, assertExists } from "@std/assert";
 import { APIResource } from "x-twitter-scraper/core/resource";
 import { z } from "zod";
+import { securityRequirements } from "../scripts/openapi.ts";
 import { handleDelivery } from "../supabase/functions/_shared/webhook.ts";
 import { askDocs, createXquik, getSportsGameView } from "../supabase/functions/_shared/xquik.ts";
 import { memoryStore, post, receiver, sampleEvent, signDelivery, TEST_ALERT } from "./delivery.ts";
 
-const security = z.array(z.record(z.string(), z.unknown()));
 const spec = z.object({
-  security,
+  security: securityRequirements,
   paths: z.record(z.string(), z.record(z.string(), z.unknown())),
   components: z.object({
     schemas: z.object({
@@ -23,7 +23,7 @@ type Operation = { id: string; method: string; template: string; inScope: boolea
 const operations: Operation[] = Object.entries(spec.paths).flatMap(([template, item]) =>
   ["get", "put", "post", "patch", "delete"].flatMap((method) => {
     if (item[method] === undefined) return [];
-    const op = z.object({ operationId: z.string(), security: security.optional() }).parse(item[method]);
+    const op = z.object({ operationId: z.string(), security: securityRequirements.optional() }).parse(item[method]);
     const requirements = op.security ?? spec.security;
     const inScope = requirements.some((requirement) =>
       Object.keys(requirement).length === 0 || "apiKey" in requirement
@@ -39,15 +39,15 @@ function operationFor(method: string, path: string): Operation | undefined {
     return op.method === method && new RegExp(`^${pattern}$`).test(path);
   });
   const params = (op: Operation) => op.template.split("{").length;
-  return matches.sort((a, b) => params(a) - params(b))[0];
+  return matches.toSorted((a, b) => params(a) - params(b))[0];
 }
 
 type Recorded = { method: string; path: string };
 const recorded: Recorded[] = [];
-const fakeFetch: typeof fetch = (input, init) => {
+const fakeFetch: typeof fetch = async (input, init) => {
   const url = input instanceof Request ? input.url : input;
   recorded.push({ method: init?.method ?? "GET", path: new URL(url).pathname });
-  return Promise.resolve(Response.json({ _meta: {}, results: [] }));
+  return await Promise.resolve(Response.json({ _meta: {}, results: [] }));
 };
 
 const placeholder: object = new Proxy({}, {
@@ -81,37 +81,38 @@ async function requestOf(resource: APIResource, name: string): Promise<Recorded 
   return undefined;
 }
 
+async function viaHelper(calls: (() => Promise<unknown>)[]): Promise<Set<string>> {
+  const ids = new Set<string>();
+  for (const call of calls) {
+    recorded.length = 0;
+    await call();
+    for (const request of recorded) {
+      const op = operationFor(request.method, request.path);
+      if (op?.inScope === true) ids.add(op.id);
+    }
+  }
+  return ids;
+}
+
 Deno.test("every in-scope operation has a tested Supabase path", async () => {
   const client = createXquik({ apiKey: "placeholder", fetch: fakeFetch, maxRetries: 0 });
   const viaSdk = new Set<string>();
   for (const resource of resourcesOf(client)) {
     for (const name of Object.getOwnPropertyNames(Reflect.getPrototypeOf(resource) ?? {})) {
       const request = name === "constructor" ? undefined : await requestOf(resource, name);
-      const op = request && operationFor(request.method, request.path);
-      if (op?.inScope) viaSdk.add(op.id);
+      const op = request === undefined ? undefined : operationFor(request.method, request.path);
+      if (op?.inScope === true) viaSdk.add(op.id);
     }
   }
 
-  async function viaHelper(calls: (() => Promise<unknown>)[]): Promise<Set<string>> {
-    const ids = new Set<string>();
-    for (const call of calls) {
-      recorded.length = 0;
-      await call();
-      for (const request of recorded) {
-        const op = operationFor(request.method, request.path);
-        if (op?.inScope) ids.add(op.id);
-      }
-    }
-    return ids;
-  }
   const viaAskDocs = await viaHelper(
-    (["GET", "POST"] as const).map((method) => () =>
-      askDocs({ query: "How do I monitor NASA?" }, { method, fetch: fakeFetch })
+    (["GET", "POST"] as const).map((method) => async () =>
+      await askDocs({ query: "How do I monitor NASA?" }, { method, fetch: fakeFetch })
     ),
   );
   const viaSportsGameView = await viaHelper(
-    (["roster", "player-props", "posts"] as const).map((view) => () =>
-      getSportsGameView(client, view, "nfl", "401547417")
+    (["roster", "player-props", "posts"] as const).map((view) => async () =>
+      await getSportsGameView(client, view, "nfl", "401547417")
     ),
   );
 
@@ -120,7 +121,7 @@ Deno.test("every in-scope operation has a tested Supabase path", async () => {
   const migration = await Deno.readTextFile(latest);
   const registry = new Set(
     [...migration.matchAll(/^ {4}\('([^']+)', '([A-Z]+)', '([^']+)'/gm)].map(([, id, method, path]) =>
-      `${id} ${method} ${path}`
+      `${String(id)} ${String(method)} ${String(path)}`
     ),
   );
 
@@ -130,10 +131,12 @@ Deno.test("every in-scope operation has a tested Supabase path", async () => {
     op.id
   );
   console.log(
-    `${inScope.length - withoutPath.length} of ${inScope.length} in-scope operations have a tested path ` +
-      `(${viaSdk.size} through SDK methods, ${viaAskDocs.size} through askDocs, ` +
-      `${viaSportsGameView.size} through getSportsGameView). ` +
-      `${inScope.length - notInRegistry.length} of ${inScope.length} are rows in the SQL registry.`,
+    `${String(inScope.length - withoutPath.length)} of ${
+      String(inScope.length)
+    } in-scope operations have a tested path ` +
+      `(${String(viaSdk.size)} through SDK methods, ${String(viaAskDocs.size)} through askDocs, ` +
+      `${String(viaSportsGameView.size)} through getSportsGameView). ` +
+      `${String(inScope.length - notInRegistry.length)} of ${String(inScope.length)} are rows in the SQL registry.`,
   );
   assertEquals(withoutPath, []);
   assertEquals(notInRegistry, []);
@@ -151,8 +154,10 @@ Deno.test("every event type gets a receiver result", async () => {
     if (response.status !== 200 || JSON.stringify(stored) !== JSON.stringify(expected)) failures.push(eventType);
   }
   console.log(
-    `${eventTypes.length + 1 - failures.length} of ${eventTypes.length + 1} event types get a receiver result ` +
-      `(${eventTypes.length} stored once, plus the acked webhook.test alert).`,
+    `${String(eventTypes.length + 1 - failures.length)} of ${
+      String(eventTypes.length + 1)
+    } event types get a receiver result ` +
+      `(${String(eventTypes.length)} stored once, plus the acked webhook.test alert).`,
   );
   assertEquals(failures, []);
 });

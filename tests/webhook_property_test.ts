@@ -1,5 +1,5 @@
 import { assertEquals, assertThrows } from "@std/assert";
-import fc from "fast-check";
+import * as fc from "fast-check";
 import { parseSecrets, verifyDelivery } from "../supabase/functions/_shared/webhook.ts";
 import { SECRET, sign } from "./delivery.ts";
 
@@ -119,8 +119,8 @@ Deno.test("reads every comma-separated secret without the blanks around it", () 
     fc.property(fc.array(entry, { minLength: 1, maxLength: 8 }), (entries) => {
       const expected = entries.map(({ value }) => value).filter((value) => value !== "");
       fc.pre(expected.length > 0);
-      const value = entries.map(({ before, value, after }) => `${before}${value}${after}`).join(",");
-      assertEquals(parseSecrets(value), expected);
+      const header = entries.map(({ before, value, after }) => `${before}${value}${after}`).join(",");
+      assertEquals(parseSecrets(header), expected);
     }),
     { seed: SEED },
   );

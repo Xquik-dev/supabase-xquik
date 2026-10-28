@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { z } from "zod";
 
 export type Mutant = {
   readonly file: string;
@@ -10,6 +11,20 @@ export type Mutant = {
 };
 export type Outcome = "killed" | "survived" | "invalid";
 export type Result = { readonly mutant: Mutant; readonly outcome: Outcome };
+
+export const equivalents = z.array(z.strictObject({
+  file: z.string(),
+  context: z.string(),
+  original: z.string(),
+  replacement: z.string(),
+  reason: z.string().min(1),
+}));
+export type Equivalent = z.infer<typeof equivalents>[number];
+export type Plan = {
+  readonly mutants: readonly Mutant[];
+  readonly equivalent: number;
+  readonly stale: readonly string[];
+};
 
 type Rewrite = readonly [pattern: RegExp, replace: (match: string) => string];
 
@@ -66,35 +81,50 @@ function emptied(literal: string, quote: string): string {
   return literal.length > 2 ? `${quote}${quote}` : `${quote}mutant${quote}`;
 }
 
+type Edit = readonly [start: number, end: number, replacement: string];
+
+function isKey(node: ts.Node): boolean {
+  const parent = node.parent;
+  return (ts.isPropertyAssignment(parent) || ts.isPropertyDeclaration(parent)) && parent.name === node;
+}
+
+function literalEdits(node: ts.Node, source: ts.SourceFile, start: number): Edit[] {
+  if (node.kind === ts.SyntaxKind.TrueKeyword || node.kind === ts.SyntaxKind.FalseKeyword) {
+    return [[start, node.end, node.kind === ts.SyntaxKind.TrueKeyword ? "false" : "true"]];
+  }
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return isKey(node) ? [] : [[start, node.end, emptied(node.getText(source), '"')]];
+  }
+  if (ts.isTemplateExpression(node)) return [[start, node.end, '""']];
+  return ts.isExpressionStatement(node) ? [[start, node.end, ";"]] : [];
+}
+
+function nodeEdits(node: ts.Node, source: ts.SourceFile): Edit[] {
+  const start = node.getStart(source);
+  if (ts.isBinaryExpression(node)) {
+    const operator = node.operatorToken;
+    return [OPERATORS.get(operator.kind)].filter((replacement) => replacement !== undefined)
+      .map((replacement): Edit => [operator.getStart(source), operator.end, replacement]);
+  }
+  if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.ExclamationToken) {
+    return [[start, node.operand.getStart(source), ""]];
+  }
+  return literalEdits(node, source, start);
+}
+
+function conditionEdits(node: ts.Node, source: ts.SourceFile): Edit[] {
+  if (!ts.isIfStatement(node) && !ts.isConditionalExpression(node)) return [];
+  const condition = ts.isIfStatement(node) ? node.expression : node.condition;
+  return [[condition.getStart(source), condition.end, "true"], [condition.getStart(source), condition.end, "false"]];
+}
+
 function typescriptMutants(file: string, text: string): Mutant[] {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, SET_PARENT_NODES);
   const found: Mutant[] = [];
-  const add = (start: number, end: number, replacement: string): void => {
-    found.push({ file, line: lineAt(text, start), start, end, original: text.slice(start, end), replacement });
-  };
   const visit = (node: ts.Node): void => {
     if (ts.isTypeNode(node) || ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) return;
-    const start = node.getStart(source);
-    if (ts.isBinaryExpression(node)) {
-      const replacement = OPERATORS.get(node.operatorToken.kind);
-      if (replacement !== undefined) add(node.operatorToken.getStart(source), node.operatorToken.end, replacement);
-    } else if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.ExclamationToken) {
-      add(start, node.operand.getStart(source), "");
-    } else if (node.kind === ts.SyntaxKind.TrueKeyword || node.kind === ts.SyntaxKind.FalseKeyword) {
-      add(start, node.end, node.kind === ts.SyntaxKind.TrueKeyword ? "false" : "true");
-    } else if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
-      const parent = node.parent;
-      const isKey = (ts.isPropertyAssignment(parent) || ts.isPropertyDeclaration(parent)) && parent.name === node;
-      if (!isKey) add(start, node.end, emptied(node.getText(source), '"'));
-    } else if (ts.isTemplateExpression(node)) {
-      add(start, node.end, '""');
-    } else if (ts.isExpressionStatement(node)) {
-      add(start, node.end, ";");
-    }
-    if (ts.isIfStatement(node) || ts.isConditionalExpression(node)) {
-      const condition = ts.isIfStatement(node) ? node.expression : node.condition;
-      add(condition.getStart(source), condition.end, "true");
-      add(condition.getStart(source), condition.end, "false");
+    for (const [start, end, replacement] of [...nodeEdits(node, source), ...conditionEdits(node, source)]) {
+      found.push({ file, line: lineAt(text, start), start, end, original: text.slice(start, end), replacement });
     }
     ts.forEachChild(node, visit);
   };
@@ -118,7 +148,7 @@ function sqlMutants(file: string, text: string): Mutant[] {
         const end = start + match[0].length;
         return { file, line: lineAt(text, start), start, end, original: match[0], replacement: replace(match[0]) };
       })
-    ).sort((left, right) => left.start - right.start);
+    ).toSorted((left, right) => left.start - right.start);
   });
 }
 
@@ -126,8 +156,38 @@ export function mutantsOf(file: string, text: string): Mutant[] {
   return file.endsWith(".sql") ? sqlMutants(file, text) : typescriptMutants(file, text);
 }
 
+function spans(text: string, context: string): (readonly [from: number, to: number])[] {
+  const words = context.split(/\s+/).map((word) => word.replaceAll(/[$()*+.?[\\\]^{|}]/g, "\\$&"));
+  return text.matchAll(new RegExp(words.join("\\s+"), "g")).map((match) =>
+    [match.index, match.index + match[0].length] as const
+  ).toArray();
+}
+
+export function plan(sources: ReadonlyMap<string, string>, entries: readonly Equivalent[]): Plan {
+  const mutants = [...sources].flatMap(([file, text]) => mutantsOf(file, text));
+  const claims = entries.map((entry) => {
+    const text = sources.get(entry.file);
+    const found = text === undefined ? [] : spans(text, entry.context);
+    const named = mutants.filter((mutant) =>
+      mutant.file === entry.file && mutant.original === entry.original && mutant.replacement === entry.replacement &&
+      found.some(([from, to]) => from <= mutant.start && mutant.end <= to)
+    );
+    return { entry, named };
+  });
+  const equivalent = new Set(claims.filter(({ named }) => named.length === 1).flatMap(({ named }) => named));
+  return {
+    mutants: mutants.filter((mutant) => !equivalent.has(mutant)),
+    equivalent: equivalent.size,
+    stale: claims.filter(({ named }) => named.length !== 1).map(({ entry, named }) =>
+      `${entry.file} has ${String(named.length)} mutants that replace ${JSON.stringify(entry.original)} with ${
+        JSON.stringify(entry.replacement)
+      } inside ${JSON.stringify(entry.context)}, and an equivalent entry must name exactly 1.`
+    ),
+  };
+}
+
 function copyTree(from: string, to: string): void {
-  Deno.mkdirSync(to, { recursive: true });
+  Deno.mkdirSync(to);
   for (const entry of Deno.readDirSync(from)) {
     const source = `${from}/${entry.name}`;
     const target = `${to}/${entry.name}`;
@@ -140,10 +200,14 @@ function copyTree(from: string, to: string): void {
 type TestRun = { readonly passed: boolean; readonly compiled: boolean; readonly output: string; readonly ms: number };
 type Covered = { readonly test: string; readonly ms: number; readonly files: ReadonlySet<string> };
 
-async function runTests(dir: string, tests: readonly string[], timeoutMs: number, report = ""): Promise<TestRun> {
+async function runTests(
+  dir: string,
+  tests: readonly string[],
+  timeoutMs: number,
+  coverage: Readonly<Record<string, string>> = {},
+): Promise<TestRun> {
   const env = Deno.env.toObject();
   delete env["DENO_COVERAGE_DIR"];
-  const coverage = report === "" ? {} : { DENO_COVERAGE_DIR: report };
   const started = performance.now();
   const { success, stdout, stderr } = await new Deno.Command(Deno.execPath(), {
     args: ["test", "--fail-fast", ...TEST_PERMISSIONS, ...tests],
@@ -154,19 +218,17 @@ async function runTests(dir: string, tests: readonly string[], timeoutMs: number
   }).output();
   const decoder = new TextDecoder();
   const output = `${decoder.decode(stdout)}${decoder.decode(stderr)}`;
-  return { passed: success, compiled: RAN_TESTS.test(output), output, ms: performance.now() - started };
+  const { duration } = performance.measure(dir, { start: started });
+  return { passed: success, compiled: RAN_TESTS.test(output), output, ms: duration };
 }
 
 async function cover(dir: string, test: string, report: string): Promise<Covered> {
-  const run = await runTests(dir, [test], BASELINE_TIMEOUT_MS, report);
+  const run = await runTests(dir, [test], BASELINE_TIMEOUT_MS, { DENO_COVERAGE_DIR: report });
   if (!run.passed) throw new Error(`${test} fails before any mutation.\n${run.output}`);
   const { stdout } = await new Deno.Command(Deno.execPath(), { args: ["coverage", "--lcov", report], cwd: dir })
     .output();
-  const files = new Set<string>();
-  for (const line of new TextDecoder().decode(stdout).split("\n")) {
-    if (line.startsWith("SF:")) files.add(line.slice(`SF:${dir}/`.length));
-  }
-  return { test, ms: run.ms, files };
+  const sources = new TextDecoder().decode(stdout).matchAll(/^SF:.+$/gm);
+  return { test, ms: run.ms, files: new Set(sources.map(([line]) => line.slice(`SF:${dir}/`.length))) };
 }
 
 async function pool<T, R>(
@@ -184,6 +246,10 @@ async function pool<T, R>(
   return results;
 }
 
+export function mutantTimeoutMs(baselineMs: readonly number[]): number {
+  return MINIMUM_TIMEOUT_MS + TIMEOUT_FACTOR * baselineMs.reduce((total, ms) => total + ms, 0);
+}
+
 export async function runMutants(
   root: string,
   mutants: readonly Mutant[],
@@ -193,19 +259,18 @@ export async function runMutants(
   const scratch = await Deno.realPath(await Deno.makeTempDir({ prefix: "xquik-mutation-" }));
   try {
     const copies = await Promise.all(Array.from({ length: Math.max(1, workers) }, async (_, index) => {
-      copyTree(root, `${scratch}/${index}`);
-      await Deno.mkdir(`${scratch}/${index}.tmp`);
-      return `${scratch}/${index}`;
+      copyTree(root, `${scratch}/${String(index)}`);
+      await Deno.mkdir(`${scratch}/${String(index)}.tmp`);
+      return `${scratch}/${String(index)}`;
     }));
-    const covered = await pool(tests, copies, (dir, test) => cover(dir, test, `${dir}.coverage/${test}`));
+    const covered = await pool(tests, copies, async (dir, test) => await cover(dir, test, `${dir}.coverage/${test}`));
     return await pool(mutants, copies, async (dir, mutant): Promise<Result> => {
       const loading = covered.filter(({ files }) => files.has(mutant.file));
       const chosen = loading.length > 0 ? loading : covered;
       const path = `${dir}/${mutant.file}`;
       const original = await Deno.readTextFile(path);
       await Deno.writeTextFile(path, original.slice(0, mutant.start) + mutant.replacement + original.slice(mutant.end));
-      const timeoutMs = MINIMUM_TIMEOUT_MS + TIMEOUT_FACTOR * chosen.reduce((total, { ms }) => total + ms, 0);
-      const run = await runTests(dir, chosen.map(({ test }) => test), timeoutMs);
+      const run = await runTests(dir, chosen.map(({ test }) => test), mutantTimeoutMs(chosen.map(({ ms }) => ms)));
       await Deno.writeTextFile(path, original);
       return { mutant, outcome: run.passed ? "survived" : run.compiled ? "killed" : "invalid" };
     });
@@ -217,20 +282,22 @@ export async function runMutants(
 export function score(results: readonly Result[]): number {
   const killed = results.filter(({ outcome }) => outcome === "killed").length;
   const survived = results.filter(({ outcome }) => outcome === "survived").length;
-  return killed + survived === 0 ? 100 : Math.round((killed / (killed + survived)) * 10_000) / 100;
+  return killed + survived === 0 ? 100 : Math.floor((killed / (killed + survived)) * 10_000) / 100;
 }
 
-export function summary(results: readonly Result[]): string {
+export function summary(results: readonly Result[], equivalent: number): string {
   const count = (outcome: Outcome): number => results.filter((result) => result.outcome === outcome).length;
   const survivors = results.filter(({ outcome }) => outcome === "survived").map(({ mutant }) =>
-    `${mutant.file}:${mutant.line} replaces ${JSON.stringify(mutant.original)} with ${
+    `${mutant.file}:${String(mutant.line)} replaces ${JSON.stringify(mutant.original)} with ${
       JSON.stringify(mutant.replacement)
     }, and every test still passes.`
   );
   return [
     ...survivors,
-    `Mutation score is ${score(results).toFixed(2)}%. The tests killed ${count("killed")} of ${
-      count("killed") + count("survived")
-    } mutants that compiled. ${count("invalid")} of ${results.length} mutants did not compile.`,
+    `Mutation score is ${score(results).toFixed(2)}%. The tests killed ${String(count("killed"))} of ${
+      String(count("killed") + count("survived"))
+    } mutants that compiled. ${String(equivalent)} of ${
+      String(results.length + equivalent)
+    } mutants are equivalent and ${String(count("invalid"))} did not compile.`,
   ].join("\n");
 }

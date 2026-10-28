@@ -16,6 +16,10 @@
 - Fail the checks on any Supabase advisor finding.
 - Add foreign tables in the `xquik` schema for public reads, through the
   Supabase Wrappers OpenAPI FDW.
+- Fail the checks on a secret anywhere in the git history or a broken Markdown
+  link. Fail them on prose that breaks the `.vale` styles, a complex function or
+  duplicated code.
+- Fail the checks on any oxlint finding, type-aware rules included.
 - Add pgTAP tests in `supabase/tests/database` for the tables, row level
   security, policies, functions, grants and indexes. `bin/check-local` runs
   them, and `supabase test db` runs them on a local stack.
@@ -23,5 +27,8 @@
   functions drops below a minimum.
 - Add fast-check property tests for the webhook signature check, the secret
   list, the `askDocs` answers and the SQL quoting.
+- Fail the checks on any mutant that a test can observe and no test catches.
+  `scripts/equivalent_mutants.json` lists each mutant that no test can observe,
+  with the reason.
 - Fail the checks when a change edits, renames, retypes or deletes a migration
   that is on `main`.
