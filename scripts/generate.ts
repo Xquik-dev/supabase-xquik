@@ -4,12 +4,11 @@ export const SPEC_PATH = "openapi.json";
 const MIGRATIONS = "supabase/migrations";
 const REGISTRY_SUFFIX = "_xquik_operations.sql";
 
-export async function latestRegistryMigration(): Promise<string> {
-  const names: string[] = [];
-  for await (const entry of Deno.readDir(MIGRATIONS)) {
-    if (entry.name.endsWith(REGISTRY_SUFFIX)) names.push(entry.name);
-  }
-  const latest = names.sort().at(-1);
+export function latestRegistryMigration(): string {
+  const names = Deno.readDirSync(MIGRATIONS).map((entry) => entry.name).filter((name) =>
+    name.endsWith(REGISTRY_SUFFIX)
+  );
+  const latest = names.toArray().sort().at(-1);
   if (latest === undefined) throw new Deno.errors.NotFound(`No *${REGISTRY_SUFFIX} migration in ${MIGRATIONS}`);
   return `${MIGRATIONS}/${latest}`;
 }
@@ -139,7 +138,13 @@ set method = excluded.method,
 if (import.meta.main) {
   const rows = operationRows(JSON.parse(await Deno.readTextFile(SPEC_PATH)));
   const sql = renderMigration(rows);
-  const latest = await latestRegistryMigration().catch(() => "");
+  const latest = (() => {
+    try {
+      return latestRegistryMigration();
+    } catch {
+      return "";
+    }
+  })();
   const current = latest === "" ? "" : await Deno.readTextFile(latest);
   const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
   const file = current === sql ? latest : `${MIGRATIONS}/${stamp}${REGISTRY_SUFFIX}`;

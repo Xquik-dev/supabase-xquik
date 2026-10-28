@@ -6,9 +6,9 @@ import { post, randomNonce, sampleEvent, sign, TEST_ALERT } from "../delivery.ts
 const status = new TextDecoder().decode(
   (await new Deno.Command("supabase", { args: ["status", "-o", "env"], stderr: "null" }).output()).stdout,
 );
-const env = Object.fromEntries([...status.matchAll(/^([A-Z_]+)="(.*)"$/gm)].map(([, name, value]) => [name, value]));
-const DB_URL = z.string().parse(env["DB_URL"]);
-const FUNCTIONS_URL = z.string().parse(env["FUNCTIONS_URL"]);
+const env = new Map([...status.matchAll(/^([A-Z_]+)="(.*)"$/gm)].map(([, name, value]) => [name, value]));
+const DB_URL = z.string().parse(env.get("DB_URL"));
+const FUNCTIONS_URL = z.string().parse(env.get("FUNCTIONS_URL"));
 const HOST_FROM_DOCKER = Deno.env.get("XQUIK_STACK_HOST") ?? "host.docker.internal";
 const WEBHOOK_SECRET = z.string().min(1).parse(Deno.env.get("XQUIK_WEBHOOK_SECRET")?.split(",")[0]?.trim());
 
@@ -30,7 +30,10 @@ type Sql = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<Reco
 
 function tagged(client: pg.Client): Sql {
   return async (strings: TemplateStringsArray, ...values: unknown[]): Promise<Record<string, unknown>[]> =>
-    (await client.query(strings.reduce((text, part, index) => `${text}$${index}${part}`), values)).rows;
+    (await client.query<Record<string, unknown>, unknown[]>(
+      strings.reduce((text, part, index) => `${text}$${index}${part}`),
+      values,
+    )).rows;
 }
 
 async function fakeXquik(sql: Sql, run: (seen: Seen[]) => Promise<void>): Promise<void> {
@@ -217,7 +220,7 @@ Deno.test("the Supabase stack", async (t) => {
       ]);
       await sql`insert into public.xquik_webhook_nonces (nonce, seen_at)
         values ('old-nonce', now() - interval '11 minutes'), ('fresh-nonce', now())`;
-      await client.query(String(jobs[1]?.["command"]));
+      await client.query<Record<string, unknown>, unknown[]>(String(jobs[1]?.["command"]));
       const left = await sql`select nonce from public.xquik_webhook_nonces where nonce in ('old-nonce', 'fresh-nonce')`;
       assertEquals(left.map((row) => row["nonce"]), ["fresh-nonce"]);
       await sql`delete from public.xquik_webhook_nonces where nonce = 'fresh-nonce'`;

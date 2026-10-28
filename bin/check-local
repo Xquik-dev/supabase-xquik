@@ -98,6 +98,12 @@ no_config_exclusions() {
   }
 }
 
+type_coverage() {
+  local files=()
+  mapfile -t files < <(git ls-files --cached --others --exclude-standard -- '*.ts')
+  "$deno" run --allow-read --allow-run --allow-env scripts/type_coverage.ts "${files[@]}"
+}
+
 lint_sql() {
   git ls-files -z -- '*.sql' | xargs -0 -r node_modules/.bin/squawk --assume-in-transaction
 }
@@ -108,8 +114,9 @@ run_check "config" "Exclusion keys in deno.json" "Remove the keys listed above."
 run_check "format" "Format check" "Run $deno fmt, then rerun." "$deno" fmt --check
 run_check "lint" "Lint" "Fix the lint findings above." "$deno" lint
 run_check "types" "Type check" "Fix the type errors above." "$deno" check
+run_check "type coverage" "Type coverage" "Give each value listed above a type without any." type_coverage
 run_check "squawk" "SQL lint" "Fix the squawk findings above." lint_sql
-run_check "tests" "Tests" "Fix the failing tests above." "$deno" test --allow-read --allow-env tests/*_test.ts
+run_check "tests" "Tests" "Fix the failing tests above." "$deno" test --allow-read --allow-write --allow-run --allow-env tests/*_test.ts
 
 current_check="Final tree check"
 if [[ -n "$status_commit" ]]; then
