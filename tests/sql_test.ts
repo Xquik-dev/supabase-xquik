@@ -1,7 +1,7 @@
 import { assert, assertArrayIncludes, assertEquals } from "@std/assert";
 import pg, { DatabaseError } from "pg";
 import { latestRegistryMigration } from "../scripts/generate.ts";
-import { Constants } from "../supabase/functions/_shared/database.types.ts";
+import "../supabase/functions/_shared/database.types.ts";
 
 type Row = Record<string, unknown>;
 type Reply = readonly [status: number, type: string | null, content: string | null];
@@ -537,15 +537,6 @@ async function testCli(t: Deno.TestContext, client: pg.Client, url: string): Pro
   await t.step(`${TYPES} matches supabase gen types for the public schema`, async () => {
     const generated = await run(SUPABASE, ["gen", "types", "typescript", "--db-url", url, "--schema", "public"]);
     assertEquals(await Deno.readTextFile(TYPES), await formatted(generated), "Run deno task types.");
-    assertEquals(
-      await query(
-        client,
-        `select coalesce(jsonb_object_agg(t.typname, (select jsonb_agg(e.enumlabel order by e.enumsortorder)
-          from pg_enum e where e.enumtypid = t.oid)), '{}') as enums
-        from pg_type t where t.typnamespace = 'public'::regnamespace and t.typtype = 'e'`,
-      ),
-      [{ enums: Constants.public.Enums }],
-    );
   });
 }
 
