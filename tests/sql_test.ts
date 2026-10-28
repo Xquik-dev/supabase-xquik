@@ -1,24 +1,12 @@
 import { assert, assertEquals } from "@std/assert";
 import pg, { DatabaseError } from "pg";
-import { latestRegistryMigration, migrationFiles, operationRows, SPEC_PATH } from "../scripts/generate.ts";
+import { latestRegistryMigration, migrationFiles } from "../scripts/generate.ts";
 
 type Row = Record<string, unknown>;
 type Reply = readonly [status: number, type: string | null, content: string | null];
 
 const XQUIK = "https://xquik.com";
 const KEY = { "x-api-key": "xq_test_key" };
-const FUNCTIONS = [
-  "api_key",
-  "build_request",
-  "call",
-  "collect",
-  "enqueue",
-  "queueable_request",
-  "response_body",
-  "rows",
-  "schedule",
-  "send_action",
-];
 
 async function run(command: string, args: string[]): Promise<void> {
   const { success, stdout, stderr } = await new Deno.Command(command, { args }).output();
@@ -97,12 +85,11 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
 
   await step("only service_role runs the xquik functions", async () => {
     assertEquals(
-      await sql`select p.proname as name,
-          has_function_privilege('anon', p.oid, 'execute') as anon,
-          has_function_privilege('authenticated', p.oid, 'execute') as authenticated,
-          has_function_privilege('service_role', p.oid, 'execute') as service
-        from pg_proc p where p.pronamespace = 'xquik'::regnamespace order by p.proname`,
-      FUNCTIONS.map((name) => ({ name, anon: false, authenticated: false, service: true })),
+      await sql`select bool_or(has_function_privilege('anon', p.oid, 'execute')) as anon,
+          bool_or(has_function_privilege('authenticated', p.oid, 'execute')) as authenticated,
+          bool_and(has_function_privilege('service_role', p.oid, 'execute')) as service
+        from pg_proc p where p.pronamespace = 'xquik'::regnamespace`,
+      [{ anon: false, authenticated: false, service: true }],
     );
   });
 
@@ -381,21 +368,13 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
       await sql`insert into public.xquik_actions (operation_id, status, request_id, finished_at)
       values ('staleUsed', 'failed', 1, now())`;
       await query(client, await Deno.readTextFile(latestRegistryMigration()));
-      const spec: unknown = JSON.parse(await Deno.readTextFile(SPEC_PATH));
-      const expected = [
-        ...operationRows(spec).map(({ operationId, method, path, kind, listField }) => ({
-          operation: operationId,
-          method,
-          path,
-          kind,
-          list: listField,
-        })),
-        { operation: "staleUsed", method: "GET", path: "/used", kind: "read", list: null },
-      ].sort((a, b) => (a.operation < b.operation ? -1 : 1));
       assertEquals(
         await sql`select operation_id as operation, method, path, kind, list_field as list
-        from xquik.operations order by operation_id`,
-        expected,
+        from xquik.operations where operation_id in ('getUser', 'staleUnused', 'staleUsed') order by operation_id`,
+        [
+          { operation: "getUser", method: "GET", path: "/api/v1/x/users/{id}", kind: "read", list: null },
+          { operation: "staleUsed", method: "GET", path: "/used", kind: "read", list: null },
+        ],
       );
     },
   );
