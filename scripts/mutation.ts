@@ -66,35 +66,50 @@ function emptied(literal: string, quote: string): string {
   return literal.length > 2 ? `${quote}${quote}` : `${quote}mutant${quote}`;
 }
 
+type Edit = readonly [start: number, end: number, replacement: string];
+
+function isKey(node: ts.Node): boolean {
+  const parent = node.parent;
+  return (ts.isPropertyAssignment(parent) || ts.isPropertyDeclaration(parent)) && parent.name === node;
+}
+
+function literalEdits(node: ts.Node, source: ts.SourceFile, start: number): Edit[] {
+  if (node.kind === ts.SyntaxKind.TrueKeyword || node.kind === ts.SyntaxKind.FalseKeyword) {
+    return [[start, node.end, node.kind === ts.SyntaxKind.TrueKeyword ? "false" : "true"]];
+  }
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return isKey(node) ? [] : [[start, node.end, emptied(node.getText(source), '"')]];
+  }
+  if (ts.isTemplateExpression(node)) return [[start, node.end, '""']];
+  return ts.isExpressionStatement(node) ? [[start, node.end, ";"]] : [];
+}
+
+function nodeEdits(node: ts.Node, source: ts.SourceFile): Edit[] {
+  const start = node.getStart(source);
+  if (ts.isBinaryExpression(node)) {
+    const replacement = OPERATORS.get(node.operatorToken.kind);
+    const operator = node.operatorToken;
+    return replacement === undefined ? [] : [[operator.getStart(source), operator.end, replacement]];
+  }
+  if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.ExclamationToken) {
+    return [[start, node.operand.getStart(source), ""]];
+  }
+  return literalEdits(node, source, start);
+}
+
+function conditionEdits(node: ts.Node, source: ts.SourceFile): Edit[] {
+  if (!ts.isIfStatement(node) && !ts.isConditionalExpression(node)) return [];
+  const condition = ts.isIfStatement(node) ? node.expression : node.condition;
+  return [[condition.getStart(source), condition.end, "true"], [condition.getStart(source), condition.end, "false"]];
+}
+
 function typescriptMutants(file: string, text: string): Mutant[] {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, SET_PARENT_NODES);
   const found: Mutant[] = [];
-  const add = (start: number, end: number, replacement: string): void => {
-    found.push({ file, line: lineAt(text, start), start, end, original: text.slice(start, end), replacement });
-  };
   const visit = (node: ts.Node): void => {
     if (ts.isTypeNode(node) || ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) return;
-    const start = node.getStart(source);
-    if (ts.isBinaryExpression(node)) {
-      const replacement = OPERATORS.get(node.operatorToken.kind);
-      if (replacement !== undefined) add(node.operatorToken.getStart(source), node.operatorToken.end, replacement);
-    } else if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.ExclamationToken) {
-      add(start, node.operand.getStart(source), "");
-    } else if (node.kind === ts.SyntaxKind.TrueKeyword || node.kind === ts.SyntaxKind.FalseKeyword) {
-      add(start, node.end, node.kind === ts.SyntaxKind.TrueKeyword ? "false" : "true");
-    } else if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
-      const parent = node.parent;
-      const isKey = (ts.isPropertyAssignment(parent) || ts.isPropertyDeclaration(parent)) && parent.name === node;
-      if (!isKey) add(start, node.end, emptied(node.getText(source), '"'));
-    } else if (ts.isTemplateExpression(node)) {
-      add(start, node.end, '""');
-    } else if (ts.isExpressionStatement(node)) {
-      add(start, node.end, ";");
-    }
-    if (ts.isIfStatement(node) || ts.isConditionalExpression(node)) {
-      const condition = ts.isIfStatement(node) ? node.expression : node.condition;
-      add(condition.getStart(source), condition.end, "true");
-      add(condition.getStart(source), condition.end, "false");
+    for (const [start, end, replacement] of [...nodeEdits(node, source), ...conditionEdits(node, source)]) {
+      found.push({ file, line: lineAt(text, start), start, end, original: text.slice(start, end), replacement });
     }
     ts.forEachChild(node, visit);
   };
