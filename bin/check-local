@@ -83,10 +83,28 @@ run_check "install" "Install the locked Deno and squawk versions" \
   bun install --frozen-lockfile
 deno=node_modules/.bin/deno
 
+no_banned_patterns() {
+  git grep -nIP --untracked -f lint/banned-patterns.txt
+  (($? == 1))
+}
+
+no_config_exclusions() {
+  local found
+  found="$(jq -r 'paths | select(.[-1] == "exclude" or .[-1] == "include" or .[-1] == "ignore")
+    | select(. != ["lint", "rules", "include"]) | map(tostring) | join(".")' deno.json)" || return
+  [[ -z "$found" ]] || {
+    printf 'deno.json narrows a check with these keys.\n%s\n' "$found" >&2
+    return 1
+  }
+}
+
 lint_sql() {
   git ls-files -z -- '*.sql' | xargs -0 -r node_modules/.bin/squawk --assume-in-transaction
 }
 
+run_check "banned patterns" "Suppression and exclusion ban" \
+  "Remove each suppression or exclusion listed above and fix what it hid." no_banned_patterns
+run_check "config" "Exclusion keys in deno.json" "Remove the keys listed above." no_config_exclusions
 run_check "format" "Format check" "Run $deno fmt, then rerun." "$deno" fmt --check
 run_check "lint" "Lint" "Fix the lint findings above." "$deno" lint
 run_check "types" "Type check" "Fix the type errors above." "$deno" check

@@ -1,0 +1,23 @@
+[d]eno-lint-ignore
+[d]eno-fmt-ignore
+[d]eno-coverage-ignore
+[@]ts-(?:ignore|expect-error|nocheck|types)
+(?:[i]stanbul|[c]8|[v]8) ignore
+[n]ode:coverage\s+(?:ignore|disable)
+(?:[e]s|[o]x)lint-disable
+[p]rettier-ignore
+[s]quawk-(?:ignore|disable)
+#\s*[s]hellcheck\s+disable
+^\s*[d]isable\s*=
+[g]itleaks:allow
+[R]EUSE-Ignore
+(?:[c]odeql|[l]gtm)\[
+--[n]o-(?:check|lint|verify)
+Deno\.test\.(?:[i]gnore|[o]nly)
+(?<![\w-])(?:[i]gnore|[o]nly)\s*:
+"(?:[e]xclude|[i]gnore)"\s*:
+[e]xcluded_(?:rules|paths)
+[p]aths-ignore
+(*UTF)\x{2014}
+\\u(?:2014|\{0*2014\})
+(?i:&[m]dash;|&#0*8212;|&#x0*2014;)
