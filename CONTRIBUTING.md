@@ -14,7 +14,7 @@ bin/check-local
 4. shellcheck lints every shell file with every optional check turned on.
 5. REUSE 6.2.0 checks that every file has a license & a copyright. `REUSE.toml` gives them to each file without an SPDX header.
 6. `deno fmt --check` checks the format.
-7. `deno lint` runs every rule that applies, plus the `lint/strict.ts` plugin. The plugin bans type assertions other than `as const`, suppression comments & comments without an https link.
+7. `deno lint` runs every rule that applies, plus the `lint/strict.ts` plugin. The plugin bans each type assertion except `as const`, and each comment that has no https link.
 8. `deno check` checks the types with the strict compiler options in `deno.json`.
 9. `scripts/type_coverage.ts` fails when the type of any value contains `any`, or when a statement leaves a promise that no code awaits.
 10. squawk lints every SQL file.
