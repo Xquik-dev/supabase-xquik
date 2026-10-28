@@ -1,4 +1,4 @@
-import { latestRegistryMigration } from "../scripts/generate.ts";
+import { latestMigration, REGISTRY_SUFFIX } from "../scripts/generate.ts";
 import { assertEquals } from "@std/assert";
 import { APIResource } from "x-twitter-scraper/core/resource";
 import { z } from "zod";
@@ -106,7 +106,7 @@ Deno.test("every in-scope operation has a tested Supabase path", async () => {
     ),
   );
 
-  const migration = await Deno.readTextFile(await latestRegistryMigration());
+  const migration = await Deno.readTextFile(await latestMigration(REGISTRY_SUFFIX));
   const registry = new Set(
     [...migration.matchAll(/^ {4}\('([^']+)', '([A-Z]+)', '([^']+)'/gm)].map(([, id, method, path]) =>
       `${id} ${method} ${path}`

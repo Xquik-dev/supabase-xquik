@@ -2,15 +2,15 @@ import { z } from "zod";
 
 export const SPEC_PATH = "openapi.json";
 const MIGRATIONS = "supabase/migrations";
-const REGISTRY_SUFFIX = "_xquik_operations.sql";
+export const REGISTRY_SUFFIX = "_xquik_operations.sql";
 
-export async function latestRegistryMigration(): Promise<string> {
+export async function latestMigration(suffix: string): Promise<string> {
   const names: string[] = [];
   for await (const entry of Deno.readDir(MIGRATIONS)) {
-    if (entry.name.endsWith(REGISTRY_SUFFIX)) names.push(entry.name);
+    if (entry.name.endsWith(suffix)) names.push(entry.name);
   }
   const latest = names.sort().at(-1);
-  if (latest === undefined) throw new Deno.errors.NotFound(`No *${REGISTRY_SUFFIX} migration in ${MIGRATIONS}`);
+  if (latest === undefined) throw new Deno.errors.NotFound(`No *${suffix} migration in ${MIGRATIONS}`);
   return `${MIGRATIONS}/${latest}`;
 }
 
@@ -51,7 +51,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function resolve(root: unknown, value: unknown): unknown {
+export function resolve(root: unknown, value: unknown): unknown {
   const parsed = reference.safeParse(value);
   if (!parsed.success) return value;
   const target = parsed.data.$ref
@@ -82,10 +82,14 @@ function firstRequiredArrayProperty(root: unknown, value: unknown): string | nul
   return first !== undefined && names.every((name) => name === first) ? first : null;
 }
 
-function listField(root: unknown, responses: Record<string, unknown>): string | null {
+export function listField(root: unknown, responses: Record<string, unknown>): string | null {
   const ok = response.parse(resolve(root, responses["200"] ?? {}));
   const json = ok.content?.["application/json"];
   return json === undefined ? null : firstRequiredArrayProperty(root, json.schema);
+}
+
+export function isPublic(security: readonly Record<string, unknown>[]): boolean {
+  return security.some((requirement) => Object.keys(requirement).length === 0 || "apiKey" in requirement);
 }
 
 export function operationRows(root: unknown): OperationRow[] {
@@ -95,10 +99,7 @@ export function operationRows(root: unknown): OperationRow[] {
     for (const [key, method] of Object.entries(METHODS)) {
       if (item[key] === undefined) continue;
       const op = operation.parse(item[key]);
-      const security = op.security ?? spec.security;
-      if (!security.some((requirement) => Object.keys(requirement).length === 0 || "apiKey" in requirement)) {
-        continue;
-      }
+      if (!isPublic(op.security ?? spec.security)) continue;
       rows.push({
         operationId: op.operationId,
         method,
@@ -111,7 +112,7 @@ export function operationRows(root: unknown): OperationRow[] {
   return rows.sort((a, b) => (a.operationId < b.operationId ? -1 : 1));
 }
 
-const literal = (value: string | null) => (value === null ? "null" : `'${value.replaceAll("'", "''")}'`);
+export const literal = (value: string | null) => (value === null ? "null" : `'${value.replaceAll("'", "''")}'`);
 
 export function renderMigration(rows: readonly OperationRow[]): string {
   const values = rows
@@ -139,7 +140,7 @@ set method = excluded.method,
 if (import.meta.main) {
   const rows = operationRows(JSON.parse(await Deno.readTextFile(SPEC_PATH)));
   const sql = renderMigration(rows);
-  const latest = await latestRegistryMigration().catch((error: unknown) => {
+  const latest = await latestMigration(REGISTRY_SUFFIX).catch((error: unknown) => {
     if (error instanceof Deno.errors.NotFound) return "";
     throw error;
   });
