@@ -15,7 +15,7 @@ import {
 const encoder = new TextEncoder();
 const EVENT = JSON.stringify(sampleEvent("tweet.new"));
 
-async function reason(signed: { headers: Headers; body: string }) {
+async function reason(signed: { headers: Headers; body: string }): Promise<string> {
   const verdict = await verifyDelivery(
     { headers: signed.headers, rawBody: encoder.encode(signed.body) },
     [SECRET],

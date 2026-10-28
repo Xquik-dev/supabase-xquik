@@ -18,13 +18,13 @@ function storeError(step: string, message: string): Error {
 }
 
 const store: DeliveryStore = {
-  async claimNonce(nonce) {
+  async claimNonce(nonce): Promise<"new" | "replay"> {
     const { error } = await supabase.from("xquik_webhook_nonces").insert({ nonce });
     if (error === null) return "new";
     if (error.code === "23505") return "replay";
     throw storeError("record the nonce", error.message);
   },
-  async saveEvent(event) {
+  async saveEvent(event): Promise<"new" | "duplicate"> {
     const { data, error } = await supabase
       .from("xquik_events")
       .upsert({

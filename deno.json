@@ -36,8 +36,33 @@
   },
   "lint": {
     "rules": {
-      "tags": ["recommended"],
-      "include": ["no-non-null-assertion"]
+      "tags": ["recommended", "jsr", "workspace", "fresh", "react", "jsx"],
+      "include": [
+        "ban-untagged-todo",
+        "camelcase",
+        "default-param-last",
+        "eqeqeq",
+        "explicit-function-return-type",
+        "explicit-module-boundary-types",
+        "guard-for-in",
+        "no-boolean-literal-for-arguments",
+        "no-eval",
+        "no-external-import",
+        "no-implicit-declare-namespace-export",
+        "no-inferrable-types",
+        "no-node-globals",
+        "no-non-null-asserted-optional-chain",
+        "no-non-null-assertion",
+        "no-process-global",
+        "no-self-compare",
+        "no-sparse-arrays",
+        "no-sync-fn-in-async-fn",
+        "no-throw-literal",
+        "no-useless-rename",
+        "prefer-ascii",
+        "single-var-declarator",
+        "triple-slash-reference"
+      ]
     },
     "plugins": ["./lint/strict.ts"]
   }

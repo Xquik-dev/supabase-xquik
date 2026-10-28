@@ -42,7 +42,8 @@ function operationFor(method: string, path: string): Operation | undefined {
   return matches.sort((a, b) => params(a) - params(b))[0];
 }
 
-const recorded: { method: string; path: string }[] = [];
+type Recorded = { method: string; path: string };
+const recorded: Recorded[] = [];
 const fakeFetch: typeof fetch = (input, init) => {
   const url = input instanceof Request ? input.url : input;
   recorded.push({ method: init?.method ?? "GET", path: new URL(url).pathname });
@@ -60,7 +61,7 @@ function resourcesOf(node: object): APIResource[] {
     .flatMap((resource) => [resource, ...resourcesOf(resource)]);
 }
 
-async function requestOf(resource: APIResource, name: string) {
+async function requestOf(resource: APIResource, name: string): Promise<Recorded | undefined> {
   const method: unknown = Reflect.get(resource, name);
   if (typeof method !== "function") return undefined;
   for (let count = 0; count <= method.length + 1; count++) {
@@ -83,7 +84,7 @@ Deno.test("every in-scope operation has a tested Supabase path", async () => {
     }
   }
 
-  async function viaHelper(calls: (() => Promise<unknown>)[]) {
+  async function viaHelper(calls: (() => Promise<unknown>)[]): Promise<Set<string>> {
     const ids = new Set<string>();
     for (const call of calls) {
       recorded.length = 0;

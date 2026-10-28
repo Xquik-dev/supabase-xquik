@@ -24,7 +24,7 @@ export type AskDocsInput = {
   readonly query: string;
   readonly site?: "docs.xquik.com" | "xquik.com";
   readonly mode?: "list";
-  readonly response_format?: "chatgpt_app" | "conversational_search";
+  readonly "response_format"?: "chatgpt_app" | "conversational_search";
 };
 
 const answer = z.looseObject({

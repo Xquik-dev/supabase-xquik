@@ -26,12 +26,14 @@ const contract = new Map(
 
 type Seen = { method: string; path: string; query: Record<string, string>; body: unknown; apiKey: string | null };
 
-function tagged(client: pg.Client) {
+type Sql = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<Record<string, unknown>[]>;
+
+function tagged(client: pg.Client): Sql {
   return async (strings: TemplateStringsArray, ...values: unknown[]): Promise<Record<string, unknown>[]> =>
     (await client.query(strings.reduce((text, part, index) => `${text}$${index}${part}`), values)).rows;
 }
 
-async function fakeXquik(sql: ReturnType<typeof tagged>, run: (seen: Seen[]) => Promise<void>) {
+async function fakeXquik(sql: Sql, run: (seen: Seen[]) => Promise<void>): Promise<void> {
   const seen: Seen[] = [];
   const server = Deno.serve({ hostname: "0.0.0.0", port: 0, onListen: () => {} }, async (request) => {
     const url = new URL(request.url);
