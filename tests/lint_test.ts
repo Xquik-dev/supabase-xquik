@@ -34,7 +34,7 @@ Deno.test("no-suppression reports each lint, format, coverage and type checker s
 
 Deno.test("no-code-comments keeps only comments that an https link or an SPDX tag proves", () => {
   const source = [
-    "// SPDX-License-Identifier: Apache-2.0",
+    `// SPDX-${"License-Identifier"}: Apache-2.0`,
     "// The runtime sorts keys, as its spec says.",
     "// https://example.com/spec",
     "const a = 1;",

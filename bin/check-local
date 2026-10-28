@@ -14,6 +14,7 @@ cd "${root}"
 
 repository="Xquik-dev/supabase-xquik"
 status_context="xquik-local-checks"
+reuse_version="6.2.0"
 
 post_commit_status=true
 for argument in "$@"; do
@@ -168,6 +169,9 @@ run_check "banned patterns" "Suppression and exclusion ban" \
   "Remove each suppression or exclusion listed above and fix what it hid." no_banned_patterns
 run_check "config" "Exclusion keys in deno.json" "Remove the keys listed above." no_config_exclusions
 run_check "shellcheck" "Shell lint with every optional shellcheck check" "Fix the shellcheck findings above." lint_shell
+run_check "REUSE" "Licensing with REUSE lint" \
+  "Give each file listed above a license and copyright in REUSE.toml or an SPDX header." \
+  uv tool run --from "reuse==${reuse_version}" reuse lint
 run_check "format" "Format check" "Run ${deno} fmt, then rerun." "${deno}" fmt --check
 run_check "lint" "Lint" "Fix the lint findings above." "${deno}" lint
 run_check "types" "Type check" "Fix the type errors above." "${deno}" check
