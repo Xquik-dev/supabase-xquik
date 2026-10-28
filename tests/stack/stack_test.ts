@@ -1,5 +1,4 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-// @ts-types="npm:@types/pg@8"
 import pg, { DatabaseError } from "pg";
 import { z } from "zod";
 import { post, randomNonce, sampleEvent, sign, TEST_ALERT } from "../delivery.ts";
@@ -7,9 +6,9 @@ import { post, randomNonce, sampleEvent, sign, TEST_ALERT } from "../delivery.ts
 const status = new TextDecoder().decode(
   (await new Deno.Command("supabase", { args: ["status", "-o", "env"], stderr: "null" }).output()).stdout,
 );
-const env = Object.fromEntries([...status.matchAll(/^([A-Z_]+)="(.*)"$/gm)].map(([, name, value]) => [name, value]));
-const DB_URL = z.string().parse(env["DB_URL"]);
-const FUNCTIONS_URL = z.string().parse(env["FUNCTIONS_URL"]);
+const env = new Map([...status.matchAll(/^([A-Z_]+)="(.*)"$/gm)].map(([, name, value]) => [name, value]));
+const DB_URL = z.string().parse(env.get("DB_URL"));
+const FUNCTIONS_URL = z.string().parse(env.get("FUNCTIONS_URL"));
 const HOST_FROM_DOCKER = Deno.env.get("XQUIK_STACK_HOST") ?? "host.docker.internal";
 const WEBHOOK_SECRET = z.string().min(1).parse(Deno.env.get("XQUIK_WEBHOOK_SECRET")?.split(",")[0]?.trim());
 
@@ -27,12 +26,17 @@ const contract = new Map(
 
 type Seen = { method: string; path: string; query: Record<string, string>; body: unknown; apiKey: string | null };
 
-function tagged(client: pg.Client) {
+type Sql = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<Record<string, unknown>[]>;
+
+function tagged(client: pg.Client): Sql {
   return async (strings: TemplateStringsArray, ...values: unknown[]): Promise<Record<string, unknown>[]> =>
-    (await client.query(strings.reduce((text, part, index) => `${text}$${index}${part}`), values)).rows;
+    (await client.query<Record<string, unknown>, unknown[]>(
+      strings.reduce((text, part, index) => `${text}$${index}${part}`),
+      values,
+    )).rows;
 }
 
-async function fakeXquik(sql: ReturnType<typeof tagged>, run: (seen: Seen[]) => Promise<void>) {
+async function fakeXquik(sql: Sql, run: (seen: Seen[]) => Promise<void>): Promise<void> {
   const seen: Seen[] = [];
   const server = Deno.serve({ hostname: "0.0.0.0", port: 0, onListen: () => {} }, async (request) => {
     const url = new URL(request.url);
@@ -173,12 +177,12 @@ Deno.test("the Supabase stack", async (t) => {
         };
         assertEquals(await finish("NASA"), {
           status: "succeeded",
-          http_status: 200,
+          http_status: "200",
           response: { tweets: [{ id: "1" }, { id: "2" }], ok: true },
         });
         assertEquals(await finish("missing"), {
           status: "failed",
-          http_status: 404,
+          http_status: "404",
           response: { error: "user_not_found", message: "No user has that handle." },
         });
         assertEquals(seen.map(({ method, path }) => `${method} ${path}`), [
@@ -216,7 +220,7 @@ Deno.test("the Supabase stack", async (t) => {
       ]);
       await sql`insert into public.xquik_webhook_nonces (nonce, seen_at)
         values ('old-nonce', now() - interval '11 minutes'), ('fresh-nonce', now())`;
-      await client.query(String(jobs[1]?.["command"]));
+      await client.query<Record<string, unknown>, unknown[]>(String(jobs[1]?.["command"]));
       const left = await sql`select nonce from public.xquik_webhook_nonces where nonce in ('old-nonce', 'fresh-nonce')`;
       assertEquals(left.map((row) => row["nonce"]), ["fresh-nonce"]);
       await sql`delete from public.xquik_webhook_nonces where nonce = 'fresh-nonce'`;

@@ -4,7 +4,7 @@ import { FOREIGN_TABLES_SUFFIX, foreignTables, renderForeignTables } from "../sc
 import { latestMigration, resolve, SPEC_PATH } from "../scripts/generate.ts";
 
 const root: unknown = JSON.parse(await Deno.readTextFile(SPEC_PATH));
-const migration = await Deno.readTextFile(await latestMigration(FOREIGN_TABLES_SUFFIX));
+const migration = await Deno.readTextFile(latestMigration(FOREIGN_TABLES_SUFFIX));
 
 const security = z.array(z.record(z.string(), z.unknown()));
 const spec = z.object({

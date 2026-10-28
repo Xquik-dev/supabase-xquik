@@ -1,0 +1,4 @@
+comment = 'Stand-in for pg_cron that stores each job without running it'
+default_version = '1.0'
+relocatable = false
+schema = pg_catalog

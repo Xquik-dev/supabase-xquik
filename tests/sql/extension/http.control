@@ -1,0 +1,4 @@
+comment = 'Stand-in for http that records each request and answers with the latest reply a test set'
+default_version = '1.0'
+relocatable = false
+schema = extensions

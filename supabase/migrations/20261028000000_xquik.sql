@@ -1,3 +1,6 @@
+set local lock_timeout = '5s';
+set local statement_timeout = '60s';
+
 create extension if not exists http with schema extensions;
 create extension if not exists pg_net with schema extensions;
 create extension if not exists pg_cron with schema pg_catalog;
@@ -20,7 +23,7 @@ create table public.xquik_actions (
   params jsonb not null default '{}',
   status text not null default 'queued' check (status in ('queued', 'sent', 'succeeded', 'failed')),
   request_id bigint,
-  http_status int,
+  http_status bigint,
   response jsonb,
   created_at timestamptz not null default now(),
   finished_at timestamptz,

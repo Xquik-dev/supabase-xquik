@@ -5,14 +5,16 @@ export const SPEC_PATH = "openapi.json";
 const MIGRATIONS = "supabase/migrations";
 export const REGISTRY_SUFFIX = "_xquik_operations.sql";
 
-export async function latestMigration(suffix: string): Promise<string> {
-  const names: string[] = [];
-  for await (const entry of Deno.readDir(MIGRATIONS)) {
-    if (entry.name.endsWith(suffix)) names.push(entry.name);
-  }
-  const latest = names.sort().at(-1);
+export function migrationFiles(): string[] {
+  return Deno.readDirSync(MIGRATIONS).map((entry) => `${MIGRATIONS}/${entry.name}`).filter((path) =>
+    path.endsWith(".sql")
+  ).toArray().sort();
+}
+
+export function latestMigration(suffix: string): string {
+  const latest = migrationFiles().filter((path) => path.endsWith(suffix)).at(-1);
   if (latest === undefined) throw new Deno.errors.NotFound(`No *${suffix} migration in ${MIGRATIONS}`);
-  return `${MIGRATIONS}/${latest}`;
+  return latest;
 }
 
 const METHODS = { get: "GET", put: "PUT", post: "POST", patch: "PATCH", delete: "DELETE" } as const;
@@ -147,10 +149,13 @@ if (import.meta.main) {
     { count: { foreignTables: tables.length }, suffix: FOREIGN_TABLES_SUFFIX, sql: renderForeignTables(tables) },
   ];
   for (const [offset, { count, suffix, sql }] of migrations.entries()) {
-    const latest = await latestMigration(suffix).catch((error: unknown) => {
-      if (error instanceof Deno.errors.NotFound) return "";
-      throw error;
-    });
+    const latest = (() => {
+      try {
+        return latestMigration(suffix);
+      } catch {
+        return "";
+      }
+    })();
     const current = latest === "" ? "" : await Deno.readTextFile(latest);
     // Supabase keys each migration by its stamp, so 2 files written in 1 second need different stamps.
     const stamp = new Date(Date.now() + offset * 1000).toISOString().replace(/\D/g, "").slice(0, 14);

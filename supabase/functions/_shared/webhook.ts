@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const TOLERANCE_MS = 5 * 60 * 1000;
 const encoder = new TextEncoder();
+const EXTRACTABLE = false;
 
 const monitorEvent = z.looseObject({
   eventType: z.string().min(1),
@@ -43,22 +44,26 @@ export function parseSecrets(value: string | undefined): readonly string[] {
 }
 
 function hexBytes(hex: string): Uint8Array<ArrayBuffer> {
-  return Uint8Array.from(hex.match(/../g) ?? [], (pair) => parseInt(pair, 16));
+  return Uint8Array.from({ length: hex.length / 2 }, (_, index) => parseInt(hex.slice(index * 2, index * 2 + 2), 16));
 }
 
-async function signedByAny(secrets: readonly string[], signature: string, message: Uint8Array<ArrayBuffer>) {
+async function signedByAny(
+  secrets: readonly string[],
+  signature: string,
+  message: Uint8Array<ArrayBuffer>,
+): Promise<boolean> {
   const mac = hexBytes(signature);
   const results = await Promise.all(secrets.map(async (secret) => {
     const key = await crypto.subtle.importKey(
       "raw",
       encoder.encode(secret),
       { name: "HMAC", hash: "SHA-256" },
-      false,
+      EXTRACTABLE,
       ["verify"],
     );
     return crypto.subtle.verify("HMAC", key, mac, message);
   }));
-  return results.includes(true);
+  return results.some((valid) => valid);
 }
 
 function parseBody(rawBody: Uint8Array): Delivery | undefined {
