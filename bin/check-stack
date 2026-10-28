@@ -15,7 +15,8 @@ postgrest_image="postgrest/postgrest"
 postgrest_digest="sha256:f3f2a7541965792e51717d10341e09971ea41409dd38e12ea0453042a750c00e"
 serve_main_sha256="85a6ff68c2b0be14fe68eecd6bd373290c43aa55119f6ddca94ae7779569de02"
 serve_main_deps_sha256="26e66cebb14bc4ebf765d3ea3b84b1d841f3c7e86539ecb5fac2ded25eaa3e1d"
-store_link="/tmp/nixst"
+store_link="/tmp/n${postgres_digest:7:4}"
+main_imports='{"imports": {"effect": "npm:effect@4.0.2", "jose": "npm:jose@6.2.10"}}'
 
 password="postgres"
 
@@ -55,14 +56,13 @@ report() {
   echo "$1 after $(((${EPOCHREALTIME/./} - started) / 1000)) ms."
 }
 
-free_port() {
+pick_ports() {
   local port
-  while :; do
+  ports=()
+  while ((${#ports[@]} < 5)); do
     port=$((20000 + RANDOM % 40000))
-    if ! (: <"/dev/tcp/127.0.0.1/${port}") 2>/dev/null; then
-      echo "${port}"
-      return
-    fi
+    [[ " ${ports[*]} " != *" ${port} "* ]] || continue
+    if ! (: <"/dev/tcp/127.0.0.1/${port}") 2>/dev/null; then ports+=("${port}"); fi
   done
 }
 
@@ -97,14 +97,17 @@ relocate_store() {
   local store="$1/nix/store"
   [[ -f "$1/.relocated" ]] && return
   find "${store}" -type l -lname '/nix/store/*' -printf '%l\0%p\0' |
-    perl -0 -ne 'chomp; push @pair, $_; next if @pair < 2; my ($target, $link) = @pair; @pair = ();
-      $target =~ s{^/nix/store/}{/tmp/nixst/}; unlink $link or die "$link: $!"; symlink $target, $link or die "$link: $!";'
-  grep -rlZF '/nix/store/' "${store}" | xargs -0 -r -n 200 perl -0777 -pi -e 's{/nix/store/}{/tmp/nixst/}g'
+    perl -0 -ne 'BEGIN { $to = shift } chomp; push @pair, $_; next if @pair < 2; my ($target, $link) = @pair;
+      @pair = (); $target =~ s{^/nix/store/}{$to/}; unlink $link or die "$link: $!"; symlink $target, $link or die "$link: $!";' \
+      "${store_link}"
+  grep -rlZF '/nix/store/' "${store}" |
+    perl -e 'my $to = shift; my @files = do { local $/ = "\0"; map { chomp; $_ } <STDIN> };
+      local ($^I, @ARGV, $/) = ("", @files); while (<>) { s{/nix/store/}{$to/}g; print }' "${store_link}"
   touch "$1/.relocated"
 }
 
 bundle_main_service() {
-  local directory="${cache}/main-${cli_version}" source file
+  local directory="${main_dir}" source file
   [[ -f "${directory}/index.ts" ]] && return
   source="${directory}.partial"
   rm -rf -- "${source:?}"
@@ -115,7 +118,7 @@ bundle_main_service() {
   done
   printf '%s  %s\n' "${serve_main_sha256}" "${source}/serve.main.ts" "${serve_main_deps_sha256}" \
     "${source}/serve-main-deps.ts" | sha256sum --check --quiet
-  printf '{"imports": {"effect": "npm:effect@4.0.2", "jose": "npm:jose@6.2.10"}}\n' >"${source}/deno.json"
+  printf '%s\n' "${main_imports}" >"${source}/deno.json"
   (cd "${source}" && "${deno}" bundle --quiet --platform=browser --minify --config=deno.json \
     --output=index.ts serve.main.ts)
   mkdir -p "${directory}"
@@ -130,12 +133,12 @@ fill_cache() {
   if [[ ! -x "${cache}/crane-${crane_version}/crane" ]]; then
     GOBIN="${cache}/crane-${crane_version}" go install "github.com/google/go-containerregistry/cmd/crane@${crane_version}"
   fi
-  extract "${postgres_image}@${postgres_digest}" "${cache}/${postgres_digest}"
-  relocate_store "${cache}/${postgres_digest}"
+  extract "${postgres_image}@${postgres_digest}" "${postgres_dir}"
+  relocate_store "${postgres_dir}"
   extract "${edge_runtime_image}@${edge_runtime_digest}" "${cache}/${edge_runtime_digest}"
   extract "${postgrest_image}@${postgrest_digest}" "${cache}/${postgrest_digest}"
   bundle_main_service
-  ln -sfn "${cache}/${postgres_digest}/nix/store" "${store_link}"
+  ln -sfn "${postgres_dir}/nix/store" "${store_link}"
   flock --unlock "${lock}"
 }
 
@@ -156,7 +159,7 @@ profile_bin() {
 }
 
 start_postgres() {
-  local root="${cache}/${postgres_digest}" bin config="${run}/etc" file psql
+  local root="${postgres_dir}" bin config="${run}/etc" file psql
   bin="$(profile_bin "${root}")"
   mkdir -p "${config}" "${run}/socket"
   printf '%s\n' "${password}" >"${run}/password"
@@ -231,20 +234,24 @@ start_edge_runtime() {
     SUPABASE_INTERNAL_PUBLISHABLE_KEY="${publishable_key}" SUPABASE_INTERNAL_SECRET_KEY="${secret_key}" \
     SUPABASE_INTERNAL_JWT_SECRET="${jwt_secret}" SUPABASE_JWKS="${jwks}" SUPABASE_INTERNAL_HOST_PORT="${api_port}" \
     SUPABASE_INTERNAL_FUNCTIONS_CONFIG="${functions}" \
-    "${cache}/${edge_runtime_digest}/usr/local/bin/edge-runtime" start --main-service="${cache}/main-${cli_version}" \
+    "${cache}/${edge_runtime_digest}/usr/local/bin/edge-runtime" start --main-service="${main_dir}" \
     --port="${functions_port}" --policy=per_worker >"${run}/edge-runtime.log" 2>&1 &
   pids+=("$!")
   wait_for "the edge runtime" "${run}/edge-runtime.log" curl -sS -o /dev/null "http://127.0.0.1:${functions_port}/"
 }
 
 started="${EPOCHREALTIME/./}"
+postgres_dir="${cache}/${postgres_digest}-$(declare -f relocate_store | sha256sum | cut -c1-12)"
+main_dir="${cache}/main-$(printf '%s\n' "${cli_version}" "${serve_main_sha256}" "${serve_main_deps_sha256}" \
+  "${main_imports}" | sha256sum | cut -c1-12)"
 fill_cache
 report "Cache ready"
-db_port="$(free_port)"
-rest_port="$(free_port)"
-rest_admin_port="$(free_port)"
-functions_port="$(free_port)"
-api_port="$(free_port)"
+pick_ports
+db_port="${ports[0]}"
+rest_port="${ports[1]}"
+rest_admin_port="${ports[2]}"
+functions_port="${ports[3]}"
+api_port="${ports[4]}"
 jwt_secret="$(openssl rand -hex 32)"
 anon_key="$(sign_jwt anon)"
 service_role_key="$(sign_jwt service_role)"

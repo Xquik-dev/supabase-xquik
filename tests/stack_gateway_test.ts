@@ -53,7 +53,9 @@ Deno.test("gateway strips the route prefix, sets the route header and forwards t
       }),
     );
     assertEquals([posted.status, await posted.text()], [201, "answered"]);
-    const fetched = await handle(new Request("http://gateway/functions/v1/xquik-webhook"));
+    const fetched = await handle(
+      new Request("http://gateway/functions/v1/xquik-webhook", { headers: { apikey: KEYS.publishable } }),
+    );
     await fetched.body?.cancel();
     const missing = await handle(new Request("http://gateway/auth/v1/user"));
     assertEquals(missing.status, 404);
@@ -65,7 +67,7 @@ Deno.test("gateway strips the route prefix, sets the route header and forwards t
         apiKey: null,
         body: '{"id": 1}',
       },
-      { method: "GET", path: "/xquik-webhook", authorization: null, apiKey: null, body: "" },
+      { method: "GET", path: "/xquik-webhook", authorization: null, apiKey: "Bearer anon-jwt", body: "" },
     ]);
   } finally {
     await server.shutdown();
