@@ -118,7 +118,7 @@ function sqlMutants(file: string, text: string): Mutant[] {
         const end = start + match[0].length;
         return { file, line: lineAt(text, start), start, end, original: match[0], replacement: replace(match[0]) };
       })
-    ).sort((left, right) => left.start - right.start);
+    ).toSorted((left, right) => left.start - right.start);
   });
 }
 
@@ -193,11 +193,11 @@ export async function runMutants(
   const scratch = await Deno.realPath(await Deno.makeTempDir({ prefix: "xquik-mutation-" }));
   try {
     const copies = await Promise.all(Array.from({ length: Math.max(1, workers) }, async (_, index) => {
-      copyTree(root, `${scratch}/${index}`);
-      await Deno.mkdir(`${scratch}/${index}.tmp`);
-      return `${scratch}/${index}`;
+      copyTree(root, `${scratch}/${String(index)}`);
+      await Deno.mkdir(`${scratch}/${String(index)}.tmp`);
+      return `${scratch}/${String(index)}`;
     }));
-    const covered = await pool(tests, copies, (dir, test) => cover(dir, test, `${dir}.coverage/${test}`));
+    const covered = await pool(tests, copies, async (dir, test) => await cover(dir, test, `${dir}.coverage/${test}`));
     return await pool(mutants, copies, async (dir, mutant): Promise<Result> => {
       const loading = covered.filter(({ files }) => files.has(mutant.file));
       const chosen = loading.length > 0 ? loading : covered;
@@ -223,14 +223,14 @@ export function score(results: readonly Result[]): number {
 export function summary(results: readonly Result[]): string {
   const count = (outcome: Outcome): number => results.filter((result) => result.outcome === outcome).length;
   const survivors = results.filter(({ outcome }) => outcome === "survived").map(({ mutant }) =>
-    `${mutant.file}:${mutant.line} replaces ${JSON.stringify(mutant.original)} with ${
+    `${mutant.file}:${String(mutant.line)} replaces ${JSON.stringify(mutant.original)} with ${
       JSON.stringify(mutant.replacement)
     }, and every test still passes.`
   );
   return [
     ...survivors,
-    `Mutation score is ${score(results).toFixed(2)}%. The tests killed ${count("killed")} of ${
-      count("killed") + count("survived")
-    } mutants that compiled. ${count("invalid")} of ${results.length} mutants did not compile.`,
+    `Mutation score is ${score(results).toFixed(2)}%. The tests killed ${String(count("killed"))} of ${
+      String(count("killed") + count("survived"))
+    } mutants that compiled. ${String(count("invalid"))} of ${String(results.length)} mutants did not compile.`,
   ].join("\n");
 }
