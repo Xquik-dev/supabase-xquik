@@ -123,7 +123,7 @@ full_coverage() {
       if (index(file, root) == 1) file = substr(file, length(root) + 1)
       counted = file in wanted
       if (counted) seen[file] = 1
-      else print "check-local: the report also measured " file ", which is not a tracked source file."
+      else { print "The report measured " file ", which is not a tracked TypeScript source file."; stray = 1 }
     }
     !counted { next }
     /^DA:/ { split(substr($0, 4), part, ","); if (part[2] == 0) print file ":" part[1] " has a line that no test runs." }
@@ -139,7 +139,7 @@ full_coverage() {
       for (file in wanted) if (!(file in seen)) { print file " is missing from the coverage report."; missing = 1 }
       printf "Tests cover %d of %d lines, %d of %d branches and %d of %d functions.\n",
         lines_hit, lines, branches_hit, branches, functions_hit, functions
-      exit missing || lines_hit != lines || branches_hit != branches || functions_hit != functions
+      exit missing || stray || lines_hit != lines || branches_hit != branches || functions_hit != functions
     }' "$1"
 }
 
