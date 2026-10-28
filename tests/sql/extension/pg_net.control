@@ -1,0 +1,4 @@
+comment = 'Stand-in for pg_net that queues each request for a test to answer in net._http_response'
+default_version = '1.0'
+relocatable = false
+schema = extensions
