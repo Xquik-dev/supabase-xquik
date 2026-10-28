@@ -2,7 +2,11 @@
   "private": true,
   "devDependencies": {
     "deno": "2.9.6",
+    "fallow": "3.35.0",
+    "oxlint": "1.87.0",
+    "oxlint-tsgolint": "7.0.2003",
     "squawk-cli": "2.68.0",
-    "supabase": "2.122.0"
+    "supabase": "2.122.0",
+    "typescript": "6.0.3"
   }
 }

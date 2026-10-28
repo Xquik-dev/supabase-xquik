@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import pg, { DatabaseError } from "pg";
+import { Client, DatabaseError } from "pg";
 import { z } from "zod";
 import { post, randomNonce, sampleEvent, sign, TEST_ALERT } from "../delivery.ts";
 
@@ -28,10 +28,10 @@ type Seen = { method: string; path: string; query: Record<string, string>; body:
 
 type Sql = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<Record<string, unknown>[]>;
 
-function tagged(client: pg.Client): Sql {
+function tagged(client: Client): Sql {
   return async (strings: TemplateStringsArray, ...values: unknown[]): Promise<Record<string, unknown>[]> =>
     (await client.query<Record<string, unknown>, unknown[]>(
-      strings.reduce((text, part, index) => `${text}$${index}${part}`),
+      strings.reduce((text, part, index) => `${text}$${String(index)}${part}`),
       values,
     )).rows;
 }
@@ -52,7 +52,7 @@ async function fakeXquik(sql: Sql, run: (seen: Seen[]) => Promise<void>): Promis
     }
     return Response.json({ tweets: [{ id: "1" }, { id: "2" }], ok: true });
   });
-  await sql`select vault.create_secret(${`http://${HOST_FROM_DOCKER}:${server.addr.port}`}, 'xquik_base_url')`;
+  await sql`select vault.create_secret(${`http://${HOST_FROM_DOCKER}:${String(server.addr.port)}`}, 'xquik_base_url')`;
   try {
     await run(seen);
   } finally {
@@ -62,7 +62,7 @@ async function fakeXquik(sql: Sql, run: (seen: Seen[]) => Promise<void>): Promis
 }
 
 Deno.test("the Supabase stack", async (t) => {
-  const client = new pg.Client({ connectionString: DB_URL });
+  const client = new Client({ connectionString: DB_URL });
   await client.connect();
   const sql = tagged(client);
   try {
@@ -106,9 +106,9 @@ Deno.test("the Supabase stack", async (t) => {
       }
       await sql`begin`;
       const denied = await sql`set local role anon`
-        .then(() => sql`select xquik.call('getAccount')`)
-        .then(() => undefined, (error: unknown) => error)
-        .finally(() => sql`rollback`);
+        .then(async () => await sql`select xquik.call('getAccount')`)
+        .then(() => undefined, (error: unknown) => error);
+      await sql`rollback`;
       assert(denied instanceof DatabaseError);
       assertEquals(denied.code, "42501");
     });
@@ -120,7 +120,7 @@ Deno.test("the Supabase stack", async (t) => {
       await fakeXquik(sql, async (seen) => {
         for (const { operation_id: id } of registry) {
           const expected = contract.get(String(id));
-          assert(expected, `${id} is in openapi.json`);
+          assert(expected, `${String(id)} is in openapi.json`);
           const names = [...expected.template.matchAll(/\{([^}]+)\}/g)].map(([, name]) => String(name));
           const params = { ...Object.fromEntries(names.map((name) => [name, `NASA ${name}`])), probe: "x y" };
           seen.length = 0;
@@ -188,21 +188,25 @@ Deno.test("the Supabase stack", async (t) => {
     );
 
     await t.step("xquik.enqueue sends an action with pg_net and xquik.collect finishes it", async () => {
-      await fakeXquik(sql, async (seen) => {
-        const finish = async (handle: string) => {
-          const [{ id } = {}] = await sql`select xquik.enqueue('getUser', ${JSON.stringify({ id: handle })}) as id`;
-          const [sent] = await sql`select status, request_id from public.xquik_actions where id = ${String(id)}`;
-          assertEquals(sent?.["status"], "sent");
-          let finished: Record<string, unknown> | undefined;
-          for (let attempt = 0; attempt < 50 && finished === undefined; attempt++) {
-            await sql`select xquik.collect()`;
-            [finished] = await sql`select status, http_status, response from public.xquik_actions
-              where id = ${String(id)} and status <> 'sent'`;
-            if (finished === undefined) await new Promise((resolve) => setTimeout(resolve, 200));
+      const finish = async (handle: string) => {
+        const [{ id } = {}] = await sql`select xquik.enqueue('getUser', ${JSON.stringify({ id: handle })}) as id`;
+        const [sent] = await sql`select status, request_id from public.xquik_actions where id = ${String(id)}`;
+        assertEquals(sent?.["status"], "sent");
+        let finished: Record<string, unknown> | undefined;
+        for (let attempt = 0; attempt < 50 && finished === undefined; attempt++) {
+          await sql`select xquik.collect()`;
+          [finished] = await sql`select status, http_status, response from public.xquik_actions
+            where id = ${String(id)} and status <> 'sent'`;
+          if (finished === undefined) {
+            await new Promise((resolve) => {
+              setTimeout(resolve, 200);
+            });
           }
-          await sql`delete from public.xquik_actions where id = ${String(id)}`;
-          return finished;
-        };
+        }
+        await sql`delete from public.xquik_actions where id = ${String(id)}`;
+        return finished;
+      };
+      await fakeXquik(sql, async (seen) => {
         assertEquals(await finish("NASA"), {
           status: "succeeded",
           http_status: "200",
@@ -242,7 +246,7 @@ Deno.test("the Supabase stack", async (t) => {
     await t.step("the collect and nonce cleanup cron jobs run and the cleanup keeps fresh nonces", async () => {
       const jobs = await sql`select jobname, schedule, command from cron.job
         where jobname in ('xquik-collect', 'xquik-nonce-cleanup') order by jobname`;
-      assertEquals(jobs.map((job) => `${job["jobname"]} ${job["schedule"]}`), [
+      assertEquals(jobs.map((job) => `${String(job["jobname"])} ${String(job["schedule"])}`), [
         "xquik-collect 10 seconds",
         "xquik-nonce-cleanup */5 * * * *",
       ]);

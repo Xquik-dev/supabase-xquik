@@ -155,7 +155,7 @@ Deno.test("runs the tests that load the file of each mutant in a copy, all tests
 Deno.test("refuses to mutate when the tests fail before any mutation", async () => {
   const root = await fixture(MATH_TEST.replace("!== 5", "!== 6"));
   await assertRejects(
-    () => runMutants(root, mutantsOf("math.ts", MATH), ["tests/math_test.ts"], 1),
+    async () => await runMutants(root, mutantsOf("math.ts", MATH), ["tests/math_test.ts"], 1),
     Error,
     "tests/math_test.ts fails before any mutation.",
   );
@@ -191,8 +191,16 @@ Deno.test("the command lists each survivor and exits 1 only below the minimum sc
   const run = async (minimum: string): Promise<{ code: number; lines: string[] }> => {
     const output = await new Deno.Command(Deno.execPath(), {
       args: [
-        ...["run", "--config", `${REPO}/deno.json`],
-        ...["--allow-read", "--allow-write", "--allow-run", "--allow-env", SCRIPT, minimum, "math.ts"],
+        "run",
+        "--config",
+        `${REPO}/deno.json`,
+        "--allow-read",
+        "--allow-write",
+        "--allow-run",
+        "--allow-env",
+        SCRIPT,
+        minimum,
+        "math.ts",
       ],
       cwd: root,
     }).output();

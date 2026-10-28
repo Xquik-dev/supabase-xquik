@@ -47,7 +47,7 @@ type Graph = {
 
 async function deno(root: string, args: readonly string[]): Promise<string> {
   const output = await new Deno.Command(Deno.execPath(), { args: [...args], cwd: root, stderr: "inherit" }).output();
-  if (!output.success) throw new Error(`deno ${args[0]} failed with exit code ${output.code}.`);
+  if (!output.success) throw new Error(`deno ${String(args[0])} failed with exit code ${String(output.code)}.`);
   return new TextDecoder().decode(output.stdout);
 }
 
@@ -90,10 +90,10 @@ function compilerHost(options: ts.CompilerOptions, graph: Graph, denoTypes: stri
   };
   const resolve = (text: string, containingFile: string): ts.ResolvedModuleWithFailedLookupLocations => {
     const target = graph.dependencies.get(specifierOf(containingFile))?.get(text);
-    if (target?.startsWith("file:")) {
+    if (target?.startsWith("file:") === true) {
       return { resolvedModule: { resolvedFileName: new URL(target).pathname, extension: ts.Extension.Ts } };
     }
-    if (target?.startsWith("https:")) {
+    if (target?.startsWith("https:") === true) {
       return { resolvedModule: { resolvedFileName: remotePath(target), extension: ts.Extension.Ts } };
     }
     return ts.resolveModuleName(text, containingFile, options, host);
@@ -185,7 +185,7 @@ function diagnosticText(diagnostic: ts.Diagnostic): string {
   const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, " ");
   if (diagnostic.file === undefined || diagnostic.start === undefined) return message;
   const { line, character } = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
-  return `${diagnostic.file.fileName}:${line + 1}:${character + 1} ${message}`;
+  return `${diagnostic.file.fileName}:${String(line + 1)}:${String(character + 1)} ${message}`;
 }
 
 export async function typeCoverage(root: string, files: readonly string[]): Promise<Report> {
@@ -241,16 +241,18 @@ export async function typeCoverage(root: string, files: readonly string[]): Prom
 }
 
 function located({ file, line, column, text }: Site): string {
-  return `${file}:${line}:${column} ${text}`;
+  return `${file}:${String(line)}:${String(column)} ${text}`;
 }
 
 export function summary({ checked, uncovered, statements, floating }: Report): string {
   const percent = checked === 0 ? 100 : ((checked - uncovered.length) / checked) * 100;
   return [
     ...uncovered.map(located),
-    `Type coverage is ${percent.toFixed(2)}%. ${uncovered.length} of ${checked} values have a type that contains any.`,
+    `Type coverage is ${percent.toFixed(2)}%. ${String(uncovered.length)} of ${
+      String(checked)
+    } values have a type that contains any.`,
     ...floating.map(located),
-    `${floating.length} of ${statements} expression statements leave a promise that no code awaits.`,
+    `${String(floating.length)} of ${String(statements)} expression statements leave a promise that no code awaits.`,
   ].join("\n");
 }
 

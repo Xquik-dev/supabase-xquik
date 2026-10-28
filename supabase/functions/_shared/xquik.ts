@@ -7,14 +7,14 @@ export function createXquik(options: ClientOptions = {}): XTwitterScraper {
 
 export type SportsGameView = "roster" | "player-props" | "posts";
 
-export function getSportsGameView(
+export async function getSportsGameView(
   client: XTwitterScraper,
   view: SportsGameView,
   league: string,
   id: string,
   query: Record<string, string | number | boolean> = {},
 ): Promise<Record<string, unknown>> {
-  return client.get<Record<string, unknown>>(
+  return await client.get<Record<string, unknown>>(
     `/x/sports/${encodeURIComponent(league)}/games/${encodeURIComponent(id)}/${view}`,
     { query },
   );
@@ -58,7 +58,7 @@ export async function askDocs(
   if (!response.ok) {
     const parsed = failure.safeParse(body);
     throw new Error(
-      `Xquik docs search returned HTTP ${response.status}. ${parsed.success ? parsed.data.error.message : ""}`,
+      `Xquik docs search returned HTTP ${String(response.status)}. ${parsed.success ? parsed.data.error.message : ""}`,
     );
   }
   return answer.parse(body);

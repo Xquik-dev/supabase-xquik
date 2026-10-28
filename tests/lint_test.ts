@@ -15,8 +15,9 @@ Deno.test("no-type-assertion allows only as const", () => {
 });
 
 Deno.test("no-code-comments keeps only comments that an https link or an SPDX tag proves", () => {
+  const tag = "License-Identifier";
   const source = [
-    `// SPDX-${"License-Identifier"}: Apache-2.0`,
+    `// SPDX-${tag}: Apache-2.0`,
     "// The runtime sorts keys, as its spec says.",
     "// https://example.com/spec",
     "const a = 1;",

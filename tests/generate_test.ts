@@ -7,14 +7,11 @@ import {
   assertThrows,
 } from "@std/assert";
 import { z } from "zod";
-import { FOREIGN_TABLES_SUFFIX, foreignTables, renderForeignTables } from "../scripts/foreign_tables.ts";
-import { latestMigration, operationRows, REGISTRY_SUFFIX, renderMigration, SPEC_PATH } from "../scripts/generate.ts";
+import { FOREIGN_TABLES_SUFFIX, renderForeignTables } from "../scripts/foreign_tables.ts";
+import { latestMigration, readGeneration, REGISTRY_SUFFIX, renderMigration, SPEC_PATH } from "../scripts/generate.ts";
 import { publicOperations } from "../scripts/openapi.ts";
 
-const root: unknown = JSON.parse(await Deno.readTextFile(SPEC_PATH));
-const operations = publicOperations(root);
-const rows = operationRows(operations);
-const tables = foreignTables(operations);
+const { rows, tables } = await readGeneration();
 
 Deno.test("the latest registry & foreign table migrations match a fresh generation from openapi.json", async () => {
   const fresh = { [REGISTRY_SUFFIX]: renderMigration(rows), [FOREIGN_TABLES_SUFFIX]: renderForeignTables(tables) };
@@ -91,8 +88,8 @@ Deno.test("deno task generate writes each migration once under its own stamp & r
   assertMatch(registry.file, /^supabase\/migrations\/\d{14}_xquik_operations\.sql$/);
   assertMatch(foreign.file, /^supabase\/migrations\/\d{14}_xquik_foreign_tables\.sql$/);
   assertNotEquals(
-    registry.file.match(/\d{14}/)?.[0],
-    foreign.file.match(/\d{14}/)?.[0],
+    /\d{14}/.exec(registry.file)?.[0],
+    /\d{14}/.exec(foreign.file)?.[0],
     "Supabase keys each migration by its stamp, so 2 migrations in 1 run need 2 stamps",
   );
   assertEquals(await Deno.readTextFile(`${dir}/${registry.file}`), renderMigration(rows));

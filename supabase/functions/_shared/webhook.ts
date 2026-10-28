@@ -61,7 +61,7 @@ async function signedByAny(
       EXTRACTABLE,
       ["verify"],
     );
-    return crypto.subtle.verify("HMAC", key, mac, message);
+    return await crypto.subtle.verify("HMAC", key, mac, message);
   }));
   return results.some((valid) => valid);
 }
