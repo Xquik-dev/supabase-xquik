@@ -1,10 +1,11 @@
 import { assert, assertEquals } from "@std/assert";
 import pg, { DatabaseError } from "pg";
-import { latestRegistryMigration, migrationFiles, operationRows, SPEC_PATH } from "../scripts/generate.ts";
+import { latestRegistryMigration, operationRows, SPEC_PATH } from "../scripts/generate.ts";
 
 type Row = Record<string, unknown>;
 type Reply = readonly [status: number, type: string | null, content: string | null];
 
+const SUPABASE = "node_modules/.bin/supabase";
 const XQUIK = "https://xquik.com";
 const KEY = { "x-api-key": "xq_test_key" };
 const FUNCTIONS = [
@@ -20,12 +21,13 @@ const FUNCTIONS = [
   "send_action",
 ];
 
-async function run(command: string, args: string[]): Promise<void> {
-  const { success, stdout, stderr } = await new Deno.Command(command, { args }).output();
+async function run(command: string, args: string[], env: Record<string, string> = {}): Promise<string> {
+  const { success, stdout, stderr } = await new Deno.Command(command, { args, env }).output();
+  const decoder = new TextDecoder();
   if (!success) {
-    const decoder = new TextDecoder();
     throw new Error(`${command} ${args.join(" ")} failed\n${decoder.decode(stdout)}${decoder.decode(stderr)}`);
   }
+  return decoder.decode(stdout);
 }
 
 async function startCluster(dir: string): Promise<void> {
@@ -51,10 +53,9 @@ async function query(client: pg.Client, text: string, values: unknown[] = []): P
   return (await client.query<Row, unknown[]>(text, values)).rows;
 }
 
-async function applyMigrations(client: pg.Client): Promise<void> {
+async function applyMigrations(client: pg.Client, url: string): Promise<void> {
   await query(client, await Deno.readTextFile("tests/sql/supabase.sql"));
-  for (const file of migrationFiles()) await query(client, await Deno.readTextFile(file));
-  await query(client, "select vault.create_secret('xq_test_key', 'xquik_api_key')");
+  await run(SUPABASE, ["migration", "up", "--db-url", url], { XQUIK_API_KEY: KEY["x-api-key"] });
 }
 
 async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<void> {
@@ -407,9 +408,10 @@ Deno.test("the SQL functions and triggers on a throwaway Postgres 18 cluster", a
     await startCluster(dir);
     try {
       const client = new pg.Client({ host: dir, user: "postgres", database: "postgres" });
+      const url = `postgresql://localhost/postgres?user=postgres&host=${encodeURIComponent(dir)}`;
       await client.connect();
       try {
-        await applyMigrations(client);
+        await applyMigrations(client, url);
         await testFunctions(t, client);
       } finally {
         await client.end();
