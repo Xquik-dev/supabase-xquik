@@ -30,6 +30,24 @@ create table public.xquik_actions (
 create index xquik_actions_sent on public.xquik_actions (request_id) where status = 'sent';
 alter table public.xquik_actions enable row level security;
 
+create table public.xquik_events (
+  stream_event_id text primary key,
+  delivery_id text,
+  event_type text not null,
+  monitor_id text,
+  occurred_at timestamptz not null,
+  payload jsonb not null,
+  received_at timestamptz not null default now()
+);
+create index xquik_events_order on public.xquik_events (occurred_at, stream_event_id);
+alter table public.xquik_events enable row level security;
+
+create table public.xquik_webhook_nonces (
+  nonce text primary key,
+  seen_at timestamptz not null default now()
+);
+alter table public.xquik_webhook_nonces enable row level security;
+
 create type xquik.request as (method text, url text, body jsonb);
 
 create function xquik.api_key() returns text
@@ -199,3 +217,8 @@ revoke execute on all functions in schema xquik from public, anon, authenticated
 grant execute on all functions in schema xquik to service_role;
 
 select cron.schedule('xquik-collect', '10 seconds', 'select xquik.collect()');
+select cron.schedule(
+  'xquik-nonce-cleanup',
+  '*/5 * * * *',
+  $$delete from public.xquik_webhook_nonces where seen_at < now() - interval '10 minutes'$$
+);
