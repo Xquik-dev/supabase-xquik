@@ -86,7 +86,7 @@ async function signedByAny(
   return results.some(Boolean);
 }
 
-function parseJson(rawBody: Uint8Array): unknown {
+function decodeJson(rawBody: Uint8Array): unknown {
   try {
     return parseJson(decoder.decode(rawBody));
   } catch {
@@ -127,7 +127,7 @@ async function verifyDelivery(
   if (!(await isSigned(headers, secrets, { nonce, rawBody, timestamp }))) {
     return { ok: false, reason: "signature" };
   }
-  const parsed = deliveryBody.safeParse(parseJson(rawBody));
+  const parsed = deliveryBody.safeParse(decodeJson(rawBody));
   if (!parsed.success) {
     return { ok: false, reason: "malformed" };
   }

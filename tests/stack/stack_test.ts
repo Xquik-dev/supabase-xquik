@@ -17,7 +17,6 @@ const PROBE = { probe: "x y" };
 const QUERY = { body: null, query: PROBE };
 const BODY = { body: PROBE, query: {} };
 const PAYLOADS: Record<string, object> = { DELETE: QUERY, GET: QUERY, PATCH: BODY, POST: BODY, PUT: BODY };
-
 const { stdout } = await new Deno.Command("supabase", { args: ["status", "-o", "env"], stderr: "null" }).output();
 const status = new TextDecoder().decode(stdout);
 const env = new Map([...status.matchAll(ENV_LINE)].map((match) => [match.groups?.["name"], match.groups?.["value"]]));
