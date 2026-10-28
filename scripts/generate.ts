@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { FOREIGN_TABLES_SUFFIX, foreignTables, renderForeignTables } from "./foreign_tables.ts";
 
 export const SPEC_PATH = "openapi.json";
 const MIGRATIONS = "supabase/migrations";
@@ -138,15 +139,23 @@ set method = excluded.method,
 }
 
 if (import.meta.main) {
-  const rows = operationRows(JSON.parse(await Deno.readTextFile(SPEC_PATH)));
-  const sql = renderMigration(rows);
-  const latest = await latestMigration(REGISTRY_SUFFIX).catch((error: unknown) => {
-    if (error instanceof Deno.errors.NotFound) return "";
-    throw error;
-  });
-  const current = latest === "" ? "" : await Deno.readTextFile(latest);
-  const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
-  const file = current === sql ? latest : `${MIGRATIONS}/${stamp}${REGISTRY_SUFFIX}`;
-  if (file !== latest) await Deno.writeTextFile(file, sql);
-  console.log(JSON.stringify({ operations: rows.length, file, changed: file !== latest }));
+  const root: unknown = JSON.parse(await Deno.readTextFile(SPEC_PATH));
+  const rows = operationRows(root);
+  const tables = foreignTables(root);
+  const migrations = [
+    { count: { operations: rows.length }, suffix: REGISTRY_SUFFIX, sql: renderMigration(rows) },
+    { count: { foreignTables: tables.length }, suffix: FOREIGN_TABLES_SUFFIX, sql: renderForeignTables(tables) },
+  ];
+  for (const [offset, { count, suffix, sql }] of migrations.entries()) {
+    const latest = await latestMigration(suffix).catch((error: unknown) => {
+      if (error instanceof Deno.errors.NotFound) return "";
+      throw error;
+    });
+    const current = latest === "" ? "" : await Deno.readTextFile(latest);
+    // Supabase keys each migration by its stamp, so 2 files written in 1 second need different stamps.
+    const stamp = new Date(Date.now() + offset * 1000).toISOString().replace(/\D/g, "").slice(0, 14);
+    const file = current === sql ? latest : `${MIGRATIONS}/${stamp}${suffix}`;
+    if (file !== latest) await Deno.writeTextFile(file, sql);
+    console.log(JSON.stringify({ ...count, file, changed: file !== latest }));
+  }
 }
