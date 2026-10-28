@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { z } from "zod";
 
 export type Mutant = {
   readonly file: string;
@@ -10,6 +11,20 @@ export type Mutant = {
 };
 export type Outcome = "killed" | "survived" | "invalid";
 export type Result = { readonly mutant: Mutant; readonly outcome: Outcome };
+
+export const equivalents = z.array(z.strictObject({
+  file: z.string(),
+  context: z.string(),
+  original: z.string(),
+  replacement: z.string(),
+  reason: z.string().min(1),
+}));
+export type Equivalent = z.infer<typeof equivalents>[number];
+export type Plan = {
+  readonly mutants: readonly Mutant[];
+  readonly equivalent: number;
+  readonly stale: readonly string[];
+};
 
 type Rewrite = readonly [pattern: RegExp, replace: (match: string) => string];
 
@@ -141,8 +156,38 @@ export function mutantsOf(file: string, text: string): Mutant[] {
   return file.endsWith(".sql") ? sqlMutants(file, text) : typescriptMutants(file, text);
 }
 
+function spans(text: string, context: string): (readonly [from: number, to: number])[] {
+  const words = context.split(/\s+/).map((word) => word.replaceAll(/[$()*+.?[\\\]^{|}]/g, "\\$&"));
+  return text.matchAll(new RegExp(words.join("\\s+"), "g")).map((match) =>
+    [match.index, match.index + match[0].length] as const
+  ).toArray();
+}
+
+export function plan(sources: ReadonlyMap<string, string>, entries: readonly Equivalent[]): Plan {
+  const mutants = [...sources].flatMap(([file, text]) => mutantsOf(file, text));
+  const claims = entries.map((entry) => {
+    const text = sources.get(entry.file);
+    const found = text === undefined ? [] : spans(text, entry.context);
+    const named = mutants.filter((mutant) =>
+      mutant.file === entry.file && mutant.original === entry.original && mutant.replacement === entry.replacement &&
+      found.some(([from, to]) => from <= mutant.start && mutant.end <= to)
+    );
+    return { entry, named };
+  });
+  const equivalent = new Set(claims.filter(({ named }) => named.length === 1).flatMap(({ named }) => named));
+  return {
+    mutants: mutants.filter((mutant) => !equivalent.has(mutant)),
+    equivalent: equivalent.size,
+    stale: claims.filter(({ named }) => named.length !== 1).map(({ entry, named }) =>
+      `${entry.file} has ${String(named.length)} mutants that replace ${JSON.stringify(entry.original)} with ${
+        JSON.stringify(entry.replacement)
+      } inside ${JSON.stringify(entry.context)}, and an equivalent entry must name exactly 1.`
+    ),
+  };
+}
+
 function copyTree(from: string, to: string): void {
-  Deno.mkdirSync(to, { recursive: true });
+  Deno.mkdirSync(to);
   for (const entry of Deno.readDirSync(from)) {
     const source = `${from}/${entry.name}`;
     const target = `${to}/${entry.name}`;
@@ -155,10 +200,14 @@ function copyTree(from: string, to: string): void {
 type TestRun = { readonly passed: boolean; readonly compiled: boolean; readonly output: string; readonly ms: number };
 type Covered = { readonly test: string; readonly ms: number; readonly files: ReadonlySet<string> };
 
-async function runTests(dir: string, tests: readonly string[], timeoutMs: number, report = ""): Promise<TestRun> {
+async function runTests(
+  dir: string,
+  tests: readonly string[],
+  timeoutMs: number,
+  coverage: Readonly<Record<string, string>> = {},
+): Promise<TestRun> {
   const env = Deno.env.toObject();
   delete env["DENO_COVERAGE_DIR"];
-  const coverage = report === "" ? {} : { DENO_COVERAGE_DIR: report };
   const started = performance.now();
   const { success, stdout, stderr } = await new Deno.Command(Deno.execPath(), {
     args: ["test", "--fail-fast", ...TEST_PERMISSIONS, ...tests],
@@ -169,19 +218,17 @@ async function runTests(dir: string, tests: readonly string[], timeoutMs: number
   }).output();
   const decoder = new TextDecoder();
   const output = `${decoder.decode(stdout)}${decoder.decode(stderr)}`;
-  return { passed: success, compiled: RAN_TESTS.test(output), output, ms: performance.now() - started };
+  const { duration } = performance.measure(dir, { start: started });
+  return { passed: success, compiled: RAN_TESTS.test(output), output, ms: duration };
 }
 
 async function cover(dir: string, test: string, report: string): Promise<Covered> {
-  const run = await runTests(dir, [test], BASELINE_TIMEOUT_MS, report);
+  const run = await runTests(dir, [test], BASELINE_TIMEOUT_MS, { DENO_COVERAGE_DIR: report });
   if (!run.passed) throw new Error(`${test} fails before any mutation.\n${run.output}`);
   const { stdout } = await new Deno.Command(Deno.execPath(), { args: ["coverage", "--lcov", report], cwd: dir })
     .output();
-  const files = new Set<string>();
-  for (const line of new TextDecoder().decode(stdout).split("\n")) {
-    if (line.startsWith("SF:")) files.add(line.slice(`SF:${dir}/`.length));
-  }
-  return { test, ms: run.ms, files };
+  const sources = new TextDecoder().decode(stdout).matchAll(/^SF:.+$/gm);
+  return { test, ms: run.ms, files: new Set(sources.map(([line]) => line.slice(`SF:${dir}/`.length))) };
 }
 
 async function pool<T, R>(
@@ -197,6 +244,10 @@ async function pool<T, R>(
     }
   }));
   return results;
+}
+
+export function mutantTimeoutMs(baselineMs: readonly number[]): number {
+  return MINIMUM_TIMEOUT_MS + TIMEOUT_FACTOR * baselineMs.reduce((total, ms) => total + ms, 0);
 }
 
 export async function runMutants(
@@ -219,8 +270,7 @@ export async function runMutants(
       const path = `${dir}/${mutant.file}`;
       const original = await Deno.readTextFile(path);
       await Deno.writeTextFile(path, original.slice(0, mutant.start) + mutant.replacement + original.slice(mutant.end));
-      const timeoutMs = MINIMUM_TIMEOUT_MS + TIMEOUT_FACTOR * chosen.reduce((total, { ms }) => total + ms, 0);
-      const run = await runTests(dir, chosen.map(({ test }) => test), timeoutMs);
+      const run = await runTests(dir, chosen.map(({ test }) => test), mutantTimeoutMs(chosen.map(({ ms }) => ms)));
       await Deno.writeTextFile(path, original);
       return { mutant, outcome: run.passed ? "survived" : run.compiled ? "killed" : "invalid" };
     });
@@ -232,10 +282,10 @@ export async function runMutants(
 export function score(results: readonly Result[]): number {
   const killed = results.filter(({ outcome }) => outcome === "killed").length;
   const survived = results.filter(({ outcome }) => outcome === "survived").length;
-  return killed + survived === 0 ? 100 : Math.round((killed / (killed + survived)) * 10_000) / 100;
+  return killed + survived === 0 ? 100 : Math.floor((killed / (killed + survived)) * 10_000) / 100;
 }
 
-export function summary(results: readonly Result[]): string {
+export function summary(results: readonly Result[], equivalent: number): string {
   const count = (outcome: Outcome): number => results.filter((result) => result.outcome === outcome).length;
   const survivors = results.filter(({ outcome }) => outcome === "survived").map(({ mutant }) =>
     `${mutant.file}:${String(mutant.line)} replaces ${JSON.stringify(mutant.original)} with ${
@@ -246,6 +296,8 @@ export function summary(results: readonly Result[]): string {
     ...survivors,
     `Mutation score is ${score(results).toFixed(2)}%. The tests killed ${String(count("killed"))} of ${
       String(count("killed") + count("survived"))
-    } mutants that compiled. ${String(count("invalid"))} of ${String(results.length)} mutants did not compile.`,
+    } mutants that compiled. ${String(equivalent)} of ${
+      String(results.length + equivalent)
+    } mutants are equivalent and ${String(count("invalid"))} did not compile.`,
   ].join("\n");
 }

@@ -44,7 +44,12 @@ export const TEST_ALERT = {
   timestamp: "2026-10-28T19:00:00.000Z",
 };
 
-export async function sign(secret: string, timestamp: string, nonce: string, body: string): Promise<string> {
+export async function sign(
+  secret: string,
+  timestamp: string,
+  nonce: string,
+  body: string | Uint8Array,
+): Promise<string> {
   const key = await crypto.subtle.importKey(
     "raw",
     encoder.encode(secret),
@@ -52,12 +57,14 @@ export async function sign(secret: string, timestamp: string, nonce: string, bod
     EXTRACTABLE,
     ["sign"],
   );
-  const mac = await crypto.subtle.sign("HMAC", key, encoder.encode(`${timestamp}.${nonce}.${body}`));
+  const bytes = typeof body === "string" ? encoder.encode(body) : body;
+  const message = new Uint8Array([...encoder.encode(`${timestamp}.${nonce}.`), ...bytes]);
+  const mac = await crypto.subtle.sign("HMAC", key, message);
   return `sha256=${Array.from(new Uint8Array(mac), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
 export function randomNonce(): string {
-  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return crypto.randomUUID();
 }
 
 export type Signed = { readonly headers: Headers; readonly body: string; readonly signature: string };
@@ -68,7 +75,6 @@ export async function signDelivery(
 ): Promise<Signed> {
   const signature = await sign(secret, timestamp, nonce, body);
   const headers = new Headers({
-    "content-type": "application/json",
     "x-xquik-timestamp": timestamp,
     "x-xquik-nonce": nonce,
     "x-xquik-signature": signature,
