@@ -484,28 +484,19 @@ async function testFunctions(t: Deno.TestContext, client: pg.Client): Promise<vo
   });
 
   await step(
-    "the registry migration looks up the actions of each stale operation through xquik_actions_operation_id",
-    async () => {
-      await sql`insert into public.xquik_actions (operation_id, status, request_id, finished_at)
-      select o.operation_id, 'succeeded', n, now() from xquik.operations o, generate_series(1, 100) n`;
-      await sql`insert into xquik.operations (operation_id, method, path, kind) values ('staleUnused', 'GET', '/', 'read')`;
-      await sql`analyze public.xquik_actions`;
-      const registry = await Deno.readTextFile(latestRegistryMigration());
-      assertArrayIncludes(await plannedIndexes(registry), ["xquik_actions_operation_id"]);
-      await query(client, registry);
-      assertEquals(await sql`select operation_id from xquik.operations where operation_id = 'staleUnused'`, []);
-    },
-  );
-
-  await step(
-    "rerunning the registry migration restores changed operations and drops stale ones no action uses",
+    "rerunning the registry migration restores changed operations and drops stale ones no action uses, looking up their actions through xquik_actions_operation_id",
     async () => {
       await sql`update xquik.operations set path = '/old', list_field = 'old' where operation_id = 'getUser'`;
+      await sql`insert into public.xquik_actions (operation_id, status, request_id, finished_at)
+      select o.operation_id, 'succeeded', n, now() from xquik.operations o, generate_series(1, 100) n`;
       await sql`insert into xquik.operations (operation_id, method, path, kind)
       values ('staleUnused', 'GET', '/unused', 'read'), ('staleUsed', 'GET', '/used', 'read')`;
       await sql`insert into public.xquik_actions (operation_id, status, request_id, finished_at)
       values ('staleUsed', 'failed', 1, now())`;
-      await query(client, await Deno.readTextFile(latestRegistryMigration()));
+      await sql`analyze public.xquik_actions`;
+      const registry = await Deno.readTextFile(latestRegistryMigration());
+      assertArrayIncludes(await plannedIndexes(registry), ["xquik_actions_operation_id"]);
+      await query(client, registry);
       assertEquals(
         await sql`select operation_id as operation, method, path, kind, list_field as list
         from xquik.operations where operation_id in ('getUser', 'staleUnused', 'staleUsed') order by operation_id`,
