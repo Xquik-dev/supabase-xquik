@@ -104,19 +104,19 @@ Deno.test("bearerToken maps API keys to JWTs the way the Supabase CLI's Kong doe
 Deno.test("forward strips the route prefix, sets the route header and forwards the method and body", async () => {
   const { forwarded, server, url } = await upstream();
   try {
-    const settings = config(url);
     const posted = await forward(
       new Request("http://gateway/rest/v1/xquik_events?select=id", {
         body: '{"id": 1}',
         headers: { apikey: KEYS.secret },
         method: "POST",
       }),
-      settings,
+      config(url),
     );
     assertEquals([posted.status, await posted.text()], [CREATED, "answered"]);
-    const published = { headers: { apikey: KEYS.publishable } };
-    await (await forward(new Request("http://gateway/functions/v1/xquik-webhook", published), settings)).body?.cancel();
-    const missing = await forward(new Request("http://gateway/auth/v1/user"), settings);
+    const published = new Request("http://gateway/functions/v1/xquik-webhook", { headers: { apikey: KEYS.publishable } });
+    const fetched = await forward(published, config(url));
+    await fetched.body?.cancel();
+    const missing = await forward(new Request("http://gateway/auth/v1/user"), config(url));
     assertEquals([missing.status, forwarded], [NOT_FOUND, [
       {
         apiKey: null,

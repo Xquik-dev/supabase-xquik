@@ -26,17 +26,22 @@ function bearerToken(headers: Headers, { anon, publishable, secret, serviceRole 
   return apiKey;
 }
 
+function routedHeaders(request: Request, header: string, keys: Keys): Headers {
+  const headers = new Headers(request.headers);
+  const token = bearerToken(request.headers, keys);
+  if (token !== null) {
+    headers.set(header, token);
+  }
+  return headers;
+}
+
 async function forward(request: Request, { keys, routes }: GatewayConfig): Promise<Response> {
   const url = new URL(request.url);
   const matched = routes.find(({ prefix }) => url.pathname.startsWith(prefix)) ?? null;
   if (matched === null) {
     return new Response(null, { status: NOT_FOUND });
   }
-  const headers = new Headers(request.headers);
-  const token = bearerToken(request.headers, keys);
-  if (token !== null) {
-    headers.set(matched.header, token);
-  }
+  const headers = routedHeaders(request, matched.header, keys);
   const init: RequestInit = { headers, method: request.method, redirect: "manual" };
   if (request.body !== null) {
     init.body = await request.arrayBuffer();
