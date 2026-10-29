@@ -26,14 +26,8 @@ interface Upstream {
 
 async function upstream(): Promise<Upstream> {
   const forwarded: Forwarded[] = [];
-  const listening = Promise.withResolvers<string>();
-  const server = Deno.serve({
-    hostname: "127.0.0.1",
-    onListen: ({ hostname, port }) => {
-      listening.resolve(`http://${hostname}:${String(port)}/`);
-    },
-    port: 0,
-  }, async (request) => {
+  const listening = Promise.withResolvers<Deno.NetAddr>();
+  const server = Deno.serve({ hostname: "127.0.0.1", onListen: listening.resolve, port: 0 }, async (request) => {
     const url = new URL(request.url);
     forwarded.push({
       apiKey: request.headers.get("sb-api-key"),
@@ -44,7 +38,8 @@ async function upstream(): Promise<Upstream> {
     });
     return new Response("answered", { status: CREATED });
   });
-  return { forwarded, server, url: await listening.promise };
+  const { port } = await listening.promise;
+  return { forwarded, server, url: `http://127.0.0.1:${String(port)}/` };
 }
 
 function config(url: string, port = 0): GatewayConfig {
