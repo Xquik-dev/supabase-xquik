@@ -107,7 +107,12 @@ Deno.test("the gateway script serves its JSON config and stops on SIGTERM", asyn
     ]);
   } finally {
     child.kill("SIGTERM");
-    assert((await child.status).success, "the gateway exits cleanly on SIGTERM");
+    const deadline = setTimeout(() => {
+      child.kill("SIGKILL");
+    }, 5000);
+    const { success } = await child.status;
+    clearTimeout(deadline);
     await server.shutdown();
+    assert(success, "the gateway exits cleanly within 5 seconds of SIGTERM");
   }
 });
