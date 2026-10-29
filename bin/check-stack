@@ -21,8 +21,8 @@ main_imports='{"imports": {"effect": "npm:effect@4.0.2", "jose": "npm:jose@6.2.1
 password="postgres"
 
 deno="$(node_modules/.bin/deno eval --quiet 'console.log(Deno.execPath())')"
-cache="${XDG_CACHE_HOME:-${HOME}/.cache}/supabase-xquik-stack"
-run="$(mktemp -d "${TMPDIR:-/tmp}/supabase-xquik-stack.XXXXXX")"
+cache="${XDG_CACHE_HOME:-${HOME}/.cache}/xquik-supabase-stack"
+run="$(mktemp -d "${TMPDIR:-/tmp}/xquik-supabase-stack.XXXXXX")"
 pids=()
 
 stop_stack() {
