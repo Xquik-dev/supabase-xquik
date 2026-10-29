@@ -46,8 +46,8 @@ Checked on 2026-10-28. See each number with its date & source on [xquik.com/trus
 You need the [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started) & Docker. Get an API key & a webhook secret from your [Xquik account](https://xquik.com).
 
 ```bash
-git clone https://github.com/Xquik-dev/supabase-xquik.git
-cd supabase-xquik
+git clone https://github.com/Xquik-dev/xquik-supabase.git
+cd xquik-supabase
 XQUIK_API_KEY=xq_your_key XQUIK_WEBHOOK_SECRET=your_webhook_secret supabase start
 ```
 
