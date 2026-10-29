@@ -113,7 +113,9 @@ Deno.test("forward strips the route prefix, sets the route header and forwards t
       config(url),
     );
     assertEquals([posted.status, await posted.text()], [CREATED, "answered"]);
-    const published = new Request("http://gateway/functions/v1/xquik-webhook", { headers: { apikey: KEYS.publishable } });
+    const published = new Request("http://gateway/functions/v1/xquik-webhook", {
+      headers: { apikey: KEYS.publishable },
+    });
     const fetched = await forward(published, config(url));
     await fetched.body?.cancel();
     const missing = await forward(new Request("http://gateway/auth/v1/user"), config(url));
