@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Xquik Contributors
+# SPDX-License-Identifier: Apache-2.0
+set -euo pipefail
+
+target="$1"
+link="$2"
+
+if [[ -e "${link}" || -L "${link}" ]]; then
+  owner=""
+  [[ ! -L "${link}" ]] || owner="$(stat -c %u -- "${link}")"
+  [[ "${owner}" == "${EUID}" ]] || {
+    echo "own-link: ${link} is not a symbolic link this user owns. Remove it and rerun." >&2
+    exit 1
+  }
+fi
+ln -sfnT -- "${target}" "${link}"

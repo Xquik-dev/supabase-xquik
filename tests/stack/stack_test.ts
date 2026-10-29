@@ -113,7 +113,7 @@ async function testTables(test: Deno.TestContext, sql: Sql): Promise<void> {
           anon: false,
           authenticated: false,
           config: ['search_path=""'],
-          definer: true,
+          definer: name !== "response_body",
           owner: "postgres",
           service_role: true,
         },

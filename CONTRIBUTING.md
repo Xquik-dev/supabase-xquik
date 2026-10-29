@@ -27,8 +27,9 @@ bin/check-local
 17. `git diff` fails when a branch edits, renames or deletes a migration on `origin/main`, or replaces it with a symbolic link. A database may have applied that migration. Put each schema change in a new migration.
 18. `deno audit` and `bun audit` check `deno.lock` and `bun.lock` for known vulnerabilities.
 19. Every test must run and pass, with no ignored test or step. The tests must run every line, branch and function of every tracked TypeScript source file, and the coverage report must measure no other file. The SQL tests apply the migrations with `supabase migration up`. They fail on any Supabase advisor finding at any level, and when `deno task types` would change `supabase/functions/_shared/database.types.ts`. They also run every pgTAP test in `supabase/tests` with pgTAP 1.3.4 from PGXN. They fail on a failed, skipped or `todo` test. They also fail when a file runs more or fewer tests than its plan. `lint/banned-patterns.txt` bans `skip`, `todo`, `todo_start` and `no_plan` calls.
-20. CodeQL runs its security-extended queries over the tracked files.
-21. `scripts/mutate.ts` changes 1 operator, condition, `true` or `false`, string or statement at a time in every tracked TypeScript source file and every SQL function body. For each change it runs the tests that load the changed file in a copy of the tree, or every test for SQL. Changes that do not compile do not count. The check fails when tests catch less than `mutation_minimum` percent of the changes that compile. It lists each change that no test caught, and `bin/check-local` sets the minimum. Each entry in `scripts/equivalent_mutants.json` names 1 change that no test can observe, with the reason. These changes do not count. The check fails before it runs any test when an entry names no change or more than 1.
+20. `bin/check-stack` runs the tests in `tests/stack/` on the pinned Supabase images without Docker, as [Stack tests](#stack-tests) describes.
+21. CodeQL runs its security-extended queries over the tracked files.
+22. `scripts/mutate.ts` changes 1 operator, condition, `true` or `false`, string or statement at a time in every tracked TypeScript source file and every SQL function body. For each change it runs the tests that load the changed file in a copy of the tree, or every test for SQL. Changes that do not compile do not count. The check fails when tests catch less than `mutation_minimum` percent of the changes that compile. It lists each change that no test caught, and `bin/check-local` sets the minimum. Each entry in `scripts/equivalent_mutants.json` names 1 change that no test can observe, with the reason. These changes do not count. The check fails before it runs any test when an entry names no change or more than 1.
 
 Fix what a check finds. Never suppress a finding or narrow a check.
 
@@ -49,7 +50,7 @@ Use the same `XQUIK_WEBHOOK_SECRET` that `supabase start` read. The tests start
 a fake Xquik server on this machine. If your Docker runs rootless, set
 `XQUIK_STACK_HOST` to an address of this machine that containers can reach.
 
-`bin/check-local` does not run the stack tests, because they need Docker and a running project. Run them yourself when you change the migrations or the webhook function. The lint, format, type and type coverage checks still read `tests/stack/`.
+`bin/check-local` runs the stack tests without Docker through `bin/check-stack`. That script needs Linux x86_64, Go, curl, jq and `openssl`. It pulls by digest the Postgres, Edge Runtime and PostgREST images that Supabase CLI 2.122.0 pins and caches them in `~/.cache/supabase-xquik-stack`. It runs their binaries on the host, applies the migrations as `supabase start` does and serves the function through the main service of the CLI. `tests/stack/gateway.ts` stands in for Kong. It strips the `/rest/v1/` and `/functions/v1/` prefixes. It turns the local secret and publishable keys into JSON Web Tokens, as Kong does in the CLI.
 
 ## Update the operations
 
