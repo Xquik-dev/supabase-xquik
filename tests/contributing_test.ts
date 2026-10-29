@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 
 const STEP = /(?<=^run_check "[^"]*" ")[^"]+/gmu;
-const ITEM = /^\d+\. \*\*[^*]+\*\*/gmu;
+const ITEM = /^\d+\. (?:\*\*[^*]+\*\*)?/gmu;
 const FIRST = 1;
 
 Deno.test("CONTRIBUTING.md numbers each check of bin/check-local in its order, under the name the run prints", async () => {

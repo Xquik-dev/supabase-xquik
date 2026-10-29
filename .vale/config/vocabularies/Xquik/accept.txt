@@ -13,6 +13,7 @@ Postgres
 repos
 shellcheck
 Supabase
+tsgolint
 uv
 Xquik
 xquik\.com
