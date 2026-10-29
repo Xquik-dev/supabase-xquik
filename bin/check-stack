@@ -228,9 +228,7 @@ start_edge_runtime() {
   jwks="$(jq -cn --arg k "${secret}" '{keys: [{kty: "oct", k: $k}]}')"
   env -i PATH=/usr/bin:/bin HOME="${HOME}" DENO_DIR="${cache}/deno" \
     XQUIK_API_KEY="${XQUIK_API_KEY}" XQUIK_WEBHOOK_SECRET="${XQUIK_WEBHOOK_SECRET}" \
-    SUPABASE_URL="http://127.0.0.1:${api_port}" SUPABASE_ANON_KEY="${anon_key}" \
-    SUPABASE_SERVICE_ROLE_KEY="${service_role_key}" \
-    SUPABASE_DB_URL="${db_url}" \
+    SUPABASE_URL="http://127.0.0.1:${api_port}" SUPABASE_ANON_KEY="${anon_key}" SUPABASE_DB_URL="${db_url}" \
     SUPABASE_INTERNAL_PUBLISHABLE_KEY="${publishable_key}" SUPABASE_INTERNAL_SECRET_KEY="${secret_key}" \
     SUPABASE_INTERNAL_JWT_SECRET="${jwt_secret}" SUPABASE_JWKS="${jwks}" SUPABASE_INTERNAL_HOST_PORT="${api_port}" \
     SUPABASE_INTERNAL_FUNCTIONS_CONFIG="${functions}" \

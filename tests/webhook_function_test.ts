@@ -1,9 +1,9 @@
 import { answersInOrder, post, randomNonce, sampleEvent, SECRET, signDelivery, TEST_ALERT } from "./delivery.ts";
-import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import parseJson from "@shared/json.ts";
 
-const FUNCTION = new URL("../supabase/functions/xquik-webhook/index.ts", import.meta.url);
-const SERVICE_ROLE_KEY = "service-role-key";
+const SECRET_KEY = "sb_secret_webhook_test";
+const PUBLISHABLE_KEY = "sb_publishable_webhook_test";
 const STORE_DOWN = "store-down";
 const BARE_EVENT = { eventType: "tweet.new", occurredAt: "2026-10-28T19:00:00Z", streamEventId: "9002" };
 const NASA_EVENT = {
@@ -18,14 +18,8 @@ const NASA_EVENT = {
   username: "NASA",
   xUserId: "11348282",
 };
-const CONNECTION: Deno.ServeHandlerInfo = {
-  completed: Promise.resolve(),
-  remoteAddr: { hostname: "127.0.0.1", port: 0, transport: "tcp" },
-};
-const EXIT_FAILURE = 1;
 const LAST = -1;
 
-type Handler = (request: Request) => Promise<Response>;
 interface Received {
   readonly table: string;
   readonly apiKey: string | null;
@@ -116,28 +110,13 @@ async function fakePostgrest(): Promise<Postgrest> {
   return { received, server, url: await listening.promise };
 }
 
-function configure(supabaseUrl: string): void {
+async function loadFunction(supabaseUrl: string): Promise<(request: Request) => Promise<Response>> {
   Deno.env.set("XQUIK_WEBHOOK_SECRET", SECRET);
   Deno.env.set("SUPABASE_URL", supabaseUrl);
-  Deno.env.set("SUPABASE_SERVICE_ROLE_KEY", SERVICE_ROLE_KEY);
-}
-
-async function loadFunction(supabaseUrl: string): Promise<Handler> {
-  const { serve } = Deno;
-  const served: Deno.ServeHandler[] = [];
-  configure(supabaseUrl);
-  Object.defineProperty(Deno, "serve", {
-    configurable: true,
-    value: (handler: Deno.ServeHandler) => served.push(handler),
-  });
-  try {
-    await import("@/supabase/functions/xquik-webhook/index.ts");
-  } finally {
-    Object.defineProperty(Deno, "serve", { configurable: true, value: serve });
-  }
-  const [handler] = served;
-  assert(handler, "the function passes a handler to Deno.serve");
-  return async (request) => await handler(request, CONNECTION);
+  Deno.env.set("SUPABASE_PUBLISHABLE_KEYS", JSON.stringify({ default: PUBLISHABLE_KEY }));
+  Deno.env.set("SUPABASE_SECRET_KEYS", JSON.stringify({ default: SECRET_KEY }));
+  const { default: webhook } = await import("@/supabase/functions/xquik-webhook/index.ts");
+  return async (request) => await webhook.fetch(request);
 }
 
 async function signedPost(body: unknown, nonce = randomNonce()): Promise<Request> {
@@ -156,7 +135,7 @@ function assertUpserts(received: readonly Received[]): void {
 }
 
 function assertReceived(received: readonly Received[]): void {
-  assertEquals(new Set(received.map((request) => request.apiKey)), new Set([SERVICE_ROLE_KEY]));
+  assertEquals(new Set(received.map((request) => request.apiKey)), new Set([SECRET_KEY]));
   assertEquals(received.map((request) => request.table), [
     "xquik_webhook_nonces",
     "xquik_events",
@@ -189,7 +168,7 @@ function assertReceived(received: readonly Received[]): void {
   assertUpserts(received);
 }
 
-Deno.test("the xquik-webhook function stores each event once through PostgREST as the service role", async () => {
+Deno.test("the xquik-webhook function stores each event once through PostgREST with the default secret key", async () => {
   const postgrest = await fakePostgrest();
   try {
     const handle = await loadFunction(postgrest.url);
@@ -219,13 +198,4 @@ Deno.test("the xquik-webhook function stores each event once through PostgREST a
   } finally {
     await postgrest.server.shutdown();
   }
-});
-
-Deno.test("the xquik-webhook function refuses to start without SUPABASE_URL", async () => {
-  const output = await new Deno.Command(Deno.execPath(), {
-    args: ["run", "--allow-env", "--allow-read", FUNCTION.pathname],
-    env: { SUPABASE_URL: "", XQUIK_WEBHOOK_SECRET: SECRET },
-  }).output();
-  assertEquals(output.code, EXIT_FAILURE);
-  assertStringIncludes(new TextDecoder().decode(output.stderr), "Set SUPABASE_URL for the xquik-webhook function.");
 });
