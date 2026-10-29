@@ -67,8 +67,12 @@ export const unused: boolean = true;
 export const both: boolean = true;
 `;
 
+const MORE = `export const extra: boolean = true;
+`;
+
 function loggingTest(name: string, failure: string): string {
   return `import { both, first } from "../flags.ts";
+import { extra } from "../more.ts";
 Deno.test("${name}", async () => {
   await Deno.writeTextFile(String(Deno.env.get("ORDER_LOG")), "${name}\\n", { append: true });
   if (${failure}) throw new Error("${name} caught the mutant");
@@ -147,21 +151,21 @@ Deno.test("runs the listed tests that load the file of each mutant, every listed
   await Deno.remove(root, { recursive: true });
 });
 
-Deno.test("runs first the test that caught the last mutant of the same file, with the same outcomes", async () => {
+Deno.test("runs first the test that caught the last mutant of the same file, and keeps each mutant's outcome", async () => {
   const root = await fixture({
-    "a_test.ts": loggingTest("a", "!both"),
+    "a_test.ts": loggingTest("a", "!both || !extra"),
     "b_test.ts": loggingTest("b", "!first || !both"),
   });
-  await Deno.writeTextFile(`${root}/flags.ts`, FLAGS);
+  await Promise.all([Deno.writeTextFile(`${root}/flags.ts`, FLAGS), Deno.writeTextFile(`${root}/more.ts`, MORE)]);
   const log = await Deno.makeTempFile();
+  const mutants = [...mutantsOf("flags.ts", FLAGS), ...mutantsOf("more.ts", MORE)];
   const results = await withEnv(
     { ORDER_LOG: log },
-    async () =>
-      await runMutants(root, mutantsOf("flags.ts", FLAGS), ["tests/a_test.ts", "tests/b_test.ts"], ONE_WORKER),
+    async () => await runMutants(root, mutants, ["tests/a_test.ts", "tests/b_test.ts"], ONE_WORKER),
   );
-  assertEquals(results.map(({ outcome }) => outcome), ["killed", "survived", "killed"]);
+  assertEquals(results.map(({ outcome }) => outcome), ["killed", "survived", "killed", "killed"]);
   const order = await Deno.readTextFile(log);
-  assertEquals(order.trim().split("\n"), ["a", "b", "a", "b", "b", "a", "b"]);
+  assertEquals(order.trim().split("\n"), ["a", "b", "a", "b", "b", "a", "b", "a"]);
   await Promise.all([Deno.remove(root, { recursive: true }), Deno.remove(log)]);
 });
 
