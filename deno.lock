@@ -3,6 +3,7 @@
   "specifiers": {
     "jsr:@std/assert@1": "1.0.19",
     "jsr:@std/internal@^1.0.12": "1.0.14",
+    "npm:@supabase/server@1": "1.9.2_@supabase+supabase-js@2.118.0_pg@8.23.1_typescript@6.0.3",
     "npm:@supabase/supabase-js@2": "2.118.0",
     "npm:@types/pg@8": "8.23.1",
     "npm:deno@2.9.6": "2.9.6",
@@ -329,6 +330,16 @@
         "tslib"
       ]
     },
+    "@supabase/middleware@1.0.0_typescript@6.0.3": {
+      "integrity": "sha512-ecA+z/o5E9sB+quuupGt8d7QjrnD4BBwZr+Qthm0uj6CtL/+yvAUTDlknhGuTbUidvx5CxBHJ1R3H96UjDpgyg==",
+      "dependencies": [
+        "std-env",
+        "typescript@6.0.3"
+      ],
+      "optionalPeers": [
+        "typescript@6.0.3"
+      ]
+    },
     "@supabase/phoenix@0.4.5": {
       "integrity": "sha512-aAn9H9ovVyeApKy11OWOrrOGq8DV68yWeH4ud2lN9fzn4aO8Zb5GLL9m1pUg9nLqIcT+ZDfAcsZe0E/nqdv2lw=="
     },
@@ -343,6 +354,18 @@
       "dependencies": [
         "@supabase/phoenix",
         "tslib"
+      ]
+    },
+    "@supabase/server@1.9.2_@supabase+supabase-js@2.118.0_pg@8.23.1_typescript@6.0.3": {
+      "integrity": "sha512-zkvU157ivZ268Ffs+2aEaYvavfchZ8IiB/Rt5tW4JTfew2JeX0TN46Do3XD5U8ganGhfAJr3BUsMHswY56+iLA==",
+      "dependencies": [
+        "@supabase/middleware",
+        "@supabase/supabase-js",
+        "jose",
+        "pg"
+      ],
+      "optionalPeers": [
+        "pg"
       ]
     },
     "@supabase/storage-js@2.118.0": {
@@ -662,6 +685,9 @@
       ],
       "bin": true
     },
+    "std-env@4.3.0": {
+      "integrity": "sha512-OtU/EgQ1kIm5KwqQpBC6ZEMXrZRui11w8zgfTWp8cdO9B8OaPsbA8bTHO2P+HNo1VlUTGMVBwPhydu6poeXiag=="
+    },
     "supabase@2.122.0": {
       "integrity": "sha512-6IQOuHnRFyUgQxi6j6WfxJ6R4sh6vgcyhKxapv/CCDqs3+O/UxMggPxGAPr2eTEt1MhAOpa6xftiNRHIsB7afQ==",
       "dependencies": [
@@ -729,6 +755,7 @@
   "workspace": {
     "dependencies": [
       "jsr:@std/assert@1",
+      "npm:@supabase/server@1",
       "npm:@supabase/supabase-js@2",
       "npm:@types/pg@8",
       "npm:fast-check@4",
@@ -751,6 +778,7 @@
     "members": {
       "supabase/functions/xquik-webhook": {
         "dependencies": [
+          "npm:@supabase/server@1",
           "npm:@supabase/supabase-js@2",
           "npm:zod@4"
         ]
