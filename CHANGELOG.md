@@ -32,3 +32,6 @@
   with the reason.
 - Fail the checks when a change edits, renames or deletes a migration that is
   on `main`, or replaces it with a symbolic link.
+- Fail the checks on any finding of the oxlint categories and plugins that the
+  Xquik app turns on. `getSportsGameView` takes the game in 1 options object,
+  and `xquik-webhook` no longer writes console logs.

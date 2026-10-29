@@ -1,18 +1,22 @@
-import { type ClientOptions, XTwitterScraper } from "x-twitter-scraper";
+import type { ClientOptions } from "x-twitter-scraper";
+import parseJson from "./json.ts";
+import { XTwitterScraper } from "x-twitter-scraper";
 import { z } from "zod";
 
-export function createXquik(options: ClientOptions = {}): XTwitterScraper {
+function createXquik(options: ClientOptions = {}): XTwitterScraper {
   return new XTwitterScraper({ apiKey: Deno.env.get("XQUIK_API_KEY") ?? null, ...options });
 }
 
-export type SportsGameView = "roster" | "player-props" | "posts";
+type SportsGameView = "roster" | "player-props" | "posts";
 
-export async function getSportsGameView(
+async function getSportsGameView(
   client: XTwitterScraper,
-  view: SportsGameView,
-  league: string,
-  id: string,
-  query: Record<string, string | number | boolean> = {},
+  { id, league, query = {}, view }: {
+    readonly id: string;
+    readonly league: string;
+    readonly query?: Record<string, string | number | boolean>;
+    readonly view: SportsGameView;
+  },
 ): Promise<Record<string, unknown>> {
   return await client.get<Record<string, unknown>>(
     `/x/sports/${encodeURIComponent(league)}/games/${encodeURIComponent(id)}/${view}`,
@@ -20,45 +24,55 @@ export async function getSportsGameView(
   );
 }
 
-export type AskDocsInput = {
+interface AskDocsInput {
   readonly query: string;
   readonly site?: "docs.xquik.com" | "xquik.com";
   readonly mode?: "list";
   readonly "response_format"?: "chatgpt_app" | "conversational_search";
-};
+}
 
+const textPart = z.object({ text: z.string(), type: z.literal("text") });
 const answer = z.looseObject({
   _meta: z.looseObject({}),
+  content: z.array(textPart).optional(),
   results: z.array(z.looseObject({})).optional(),
-  content: z.array(z.object({ type: z.literal("text"), text: z.string() })).optional(),
   structuredData: z.array(z.looseObject({})).optional(),
 });
-export type AskDocsAnswer = z.infer<typeof answer>;
+type AskDocsAnswer = z.infer<typeof answer>;
 
 const failure = z.object({ error: z.object({ message: z.string() }) });
 
-export async function askDocs(
+function requestFor(input: AskDocsInput, method: "GET" | "POST"): { readonly init: RequestInit; readonly url: URL } {
+  const url = new URL("https://xquik.com/ask");
+  if (method === "POST") {
+    return { init: { body: JSON.stringify(input), headers: { "content-type": "application/json" }, method }, url };
+  }
+  for (const [name, value] of Object.entries({ ...input })) {
+    url.searchParams.set(name, value);
+  }
+  return { init: { method }, url };
+}
+
+async function askDocs(
   input: AskDocsInput,
   { method = "GET", fetch = globalThis.fetch }: {
     readonly method?: "GET" | "POST";
     readonly fetch?: typeof globalThis.fetch;
   } = {},
 ): Promise<AskDocsAnswer> {
-  const url = new URL("https://xquik.com/ask");
-  if (method === "GET") {
-    for (const [name, value] of Object.entries(input)) url.searchParams.set(name, value);
-  }
-  const response = await fetch(
-    url,
-    method === "GET"
-      ? { method }
-      : { method, headers: { "content-type": "application/json" }, body: JSON.stringify(input) },
-  );
-  const body: unknown = await response.json();
+  const { init, url } = requestFor(input, method);
+  const response = await fetch(url, init);
+  const body: unknown = parseJson(await response.text());
   if (!response.ok) {
     const parsed = failure.safeParse(body);
     const status = `Xquik docs search returned HTTP ${String(response.status)}.`;
-    throw new Error(parsed.success ? `${status} ${parsed.data.error.message}` : status);
+    if (parsed.success) {
+      throw new Error(`${status} ${parsed.data.error.message}`);
+    }
+    throw new Error(status);
   }
   return answer.parse(body);
 }
+
+export { askDocs, createXquik, getSportsGameView };
+export type { AskDocsAnswer, AskDocsInput, SportsGameView };

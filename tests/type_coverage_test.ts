@@ -1,8 +1,13 @@
 import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
-import { summary, typeCoverage } from "../scripts/type_coverage.ts";
+import { summary, typeCoverage } from "@/scripts/type_coverage.ts";
 
-const REPO = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const REPO = new URL("..", import.meta.url).pathname.replace(/\/$/u, "");
 const SCRIPT = `${REPO}/scripts/type_coverage.ts`;
+const STRICT_CONFIG = { compilerOptions: { strict: true } };
+const LAST = -1;
+const LAST_TWO = -2;
+const EXIT_FAILURE = 1;
+const DIRTY_LINES = 8;
 
 const ANY_FROM_LIBRARIES = `export function first(value: unknown): unknown {
   if (Array.isArray(value)) return value[0];
@@ -31,11 +36,15 @@ const PROMISES = `export async function settle(maybe?: Promise<number>, pair?: [
 
 async function project(
   files: Record<string, string>,
-  config: object = { compilerOptions: { strict: true } },
+  config: object = STRICT_CONFIG,
 ): Promise<string> {
   const root = await Deno.makeTempDir();
   await Deno.writeTextFile(`${root}/deno.json`, JSON.stringify(config));
-  for (const [name, text] of Object.entries(files)) await Deno.writeTextFile(`${root}/${name}`, text);
+  await Promise.all(
+    Object.entries(files).map(async ([name, text]) => {
+      await Deno.writeTextFile(`${root}/${name}`, text);
+    }),
+  );
   return root;
 }
 
@@ -53,7 +62,7 @@ Deno.test("reports each value whose type holds any, in a union member or a type 
       "first.ts:6:49 parsed",
     ],
   );
-  assertEquals(summary(report).split("\n").slice(-2), [
+  assertEquals(summary(report).split("\n").slice(LAST_TWO), [
     "Type coverage is 71.43%. 6 of 21 values have a type that contains any.",
     "0 of 0 expression statements leave a promise that no code awaits.",
   ]);
@@ -76,7 +85,7 @@ Deno.test("reports each statement that leaves a thenable, a voided thenable or a
     ],
   );
   assertEquals(
-    summary(report).split("\n").at(-1),
+    summary(report).split("\n").at(LAST),
     "8 of 11 expression statements leave a promise that no code awaits.",
   );
 });
@@ -85,13 +94,23 @@ Deno.test("stops at a type that refers to itself", async () => {
   const root = await project({
     "nested.ts": "export type Nested = number | Nested[];\nexport const nested: Nested = [1, [2]];\n",
   });
-  assertEquals((await typeCoverage(root, ["nested.ts"])).uncovered, []);
+  const { uncovered } = await typeCoverage(root, ["nested.ts"]);
+  assertEquals(uncovered, []);
+});
+
+Deno.test("does not count as any a type that failed to resolve in a file it does not check", async () => {
+  const root = await project({
+    "lib.ts": "export const broken: Missing = 1;\n",
+    "use.ts": 'import { broken } from "./lib.ts";\nexport const copy = broken;\n',
+  });
+  const { uncovered } = await typeCoverage(root, ["use.ts"]);
+  assertEquals(uncovered, []);
 });
 
 Deno.test("resolves local, jsr and npm imports the way deno check does", async () => {
   const report = await typeCoverage(REPO, ["tests/webhook_test.ts", "supabase/functions/_shared/webhook.ts"]);
   assertEquals([report.uncovered, report.floating], [[], []]);
-  assertEquals(summary({ checked: 0, uncovered: [], statements: 0, floating: [] }).split("\n"), [
+  assertEquals(summary({ checked: 0, floating: [], statements: 0, uncovered: [] }).split("\n"), [
     "Type coverage is 100.00%. 0 of 0 values have a type that contains any.",
     "0 of 0 expression statements leave a promise that no code awaits.",
   ]);
@@ -127,8 +146,8 @@ Deno.test("fails when the program has a type error, a bad compiler option or a c
 
 Deno.test("the command exits 1 and lists the sites only when a value has any or a promise floats", async () => {
   const root = await project({
-    "first.ts": ANY_FROM_LIBRARIES,
     "fine.ts": "export const count = 1;\n",
+    "first.ts": ANY_FROM_LIBRARIES,
     "promises.ts": PROMISES,
   });
   const run = async (file: string): Promise<{ code: number; lines: string[] }> => {
@@ -139,10 +158,10 @@ Deno.test("the command exits 1 and lists the sites only when a value has any or 
     return { code: output.code, lines: new TextDecoder().decode(output.stdout).trim().split("\n") };
   };
   const dirty = await run("first.ts");
-  assertEquals([dirty.code, dirty.lines.length, dirty.lines[0]], [1, 8, "first.ts:2:36 value[0]"]);
+  assertEquals([dirty.code, dirty.lines.length, dirty.lines[0]], [EXIT_FAILURE, DIRTY_LINES, "first.ts:2:36 value[0]"]);
   const floating = await run("promises.ts");
-  assertEquals([floating.code, floating.lines.at(-1)], [
-    1,
+  assertEquals([floating.code, floating.lines.at(LAST)], [
+    EXIT_FAILURE,
     "8 of 11 expression statements leave a promise that no code awaits.",
   ]);
   const clean = await run("fine.ts");

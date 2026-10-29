@@ -1,13 +1,13 @@
 [
   {
-    "file": "scripts/mutation.ts",
+    "file": "scripts/mutants.ts",
     "context": "const BODY_START = \"as $$\".length;",
     "original": "\"as $$\"",
     "replacement": "\"\"",
     "reason": "No rewrite matches inside the as $$ prefix, so scanning it adds no mutant and moves no offset."
   },
   {
-    "file": "scripts/mutation.ts",
+    "file": "scripts/mutants.ts",
     "context": "start >= from",
     "original": ">=",
     "replacement": ">",
@@ -15,7 +15,7 @@
   },
   {
     "file": "scripts/type_coverage.ts",
-    "context": "/gm, \"\")",
+    "context": "DENO_LIB_REFERENCE, \"\")",
     "original": "\"\"",
     "replacement": "\"mutant\"",
     "reason": "The text replaces a lib reference in lib.deno.d.ts, whose diagnostics the program never reads."
@@ -33,20 +33,6 @@
     "original": "false",
     "replacement": "true",
     "reason": "The key never leaves signedByAny, so no code can try to export it."
-  },
-  {
-    "file": "supabase/functions/_shared/webhook.ts",
-    "context": "headers.get(\"x-xquik-timestamp\") ?? \"\"",
-    "original": "\"\"",
-    "replacement": "\"mutant\"",
-    "reason": "A missing header and the replacement text both fail the digits pattern, so both answer stale."
-  },
-  {
-    "file": "supabase/functions/_shared/webhook.ts",
-    "context": "headers.get(\"x-xquik-signature\") ?? \"\"",
-    "original": "\"\"",
-    "replacement": "\"mutant\"",
-    "reason": "A missing header and the replacement text both fail the sha256 pattern, so both answer signature."
   },
   {
     "file": "supabase/migrations/20261028000000_xquik.sql",

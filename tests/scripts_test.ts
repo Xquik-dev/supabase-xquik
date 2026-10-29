@@ -1,10 +1,12 @@
 import { assertEquals } from "@std/assert";
+import readDir from "@/scripts/read_dir.ts";
 
 const REPO = new URL("..", import.meta.url).pathname;
 const EMPTY_ENUMS = '    Enums: {\n      [_ in never]: never;\n    };\n\n    | keyof DefaultSchema["Enums"]\n';
 
-function names(dir: string): string[] {
-  return Deno.readDirSync(dir).map(({ name }) => name).toArray();
+async function names(dir: string): Promise<string[]> {
+  const entries = await Array.fromAsync(readDir(dir));
+  return entries.map(({ name }) => name);
 }
 
 Deno.test("importing a script runs none of its command", async () => {
@@ -20,9 +22,9 @@ Deno.test("importing a script runs none of its command", async () => {
   }).output();
   assertEquals({
     code: output.code,
+    migrations: await names(`${root}/supabase/migrations`),
     stdout: new TextDecoder().decode(output.stdout),
-    migrations: names(`${root}/supabase/migrations`),
     types: await Deno.readTextFile(`${root}/types.ts`),
-  }, { code: 0, stdout: "", migrations: [], types: EMPTY_ENUMS });
+  }, { code: 0, migrations: [], stdout: "", types: EMPTY_ENUMS });
   await Deno.remove(root, { recursive: true });
 });

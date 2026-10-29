@@ -19,7 +19,7 @@ bin/check-local
 9. REUSE 6.2.0 checks that every file has a license and a copyright. `REUSE.toml` gives them to each file without an SPDX header.
 10. `deno fmt --check` checks the format.
 11. `deno lint` runs every rule that applies, plus the `lint/strict.ts` plugin. The plugin bans each type assertion except `as const`, and each comment that has no `https` link.
-12. oxlint runs every correctness and suspicious rule of the 8 plugins in `.oxlintrc.json`, plus every type-aware rule except `prefer-readonly-parameter-types` and `require-await`. It reads the types through the import map, `deno.lock` and the types that `deno types` prints.
+12. oxlint runs every rule of the 7 categories and 12 plugins in `.oxlintrc.json` on every file, type-aware rules included. The 9 rules it turns off contradict another rule or the API that the code must call. It reads the types through the import map, `deno.lock` and the types that `deno types` prints.
 13. fallow fails on any function over the limits in `.fallowrc.json`. It also fails on duplicated code, including clones between TypeScript and JavaScript.
 14. `deno check` checks the types with the strict compiler options in `deno.json`.
 15. `scripts/type_coverage.ts` fails when the type of any value contains `any`. It also fails when a statement leaves a promise, a voided promise or an array of promises that no code awaits.

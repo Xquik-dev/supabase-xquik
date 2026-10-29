@@ -141,7 +141,7 @@ The `xquik-webhook` function stores each event in `public.xquik_events`. It chec
 - A bad signature, an old timestamp or a reused nonce gets a 401.
 - A storage error gets a 503, so Xquik retries the delivery.
 
-Read events in order with `order by occurred_at, stream_event_id`. Put slow work in `onEvent` in `supabase/functions/xquik-webhook/index.ts`. It runs after Xquik gets its answer, once per new event.
+Read events in order with `order by occurred_at, stream_event_id`. Put slow work in an `after` callback that you pass to `handleDelivery` in `supabase/functions/xquik-webhook/index.ts`, and wrap it in `EdgeRuntime.waitUntil`. It runs after Xquik gets its answer, once per new event.
 
 Each webhook URL has its own secret. Set several secrets in `XQUIK_WEBHOOK_SECRET` with commas between them. This also lets you rotate a secret without missing events. A pg_cron job removes nonces older than 10 minutes.
 

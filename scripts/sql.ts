@@ -1,7 +1,12 @@
-export function literal(value: string | null): string {
-  return value === null ? "null" : `'${value.replaceAll("'", "''")}'`;
+function literal(value: string | null): string {
+  if (value === null) {
+    return "null";
+  }
+  return `'${value.replaceAll("'", "''")}'`;
 }
 
-export function identifier(name: string): string {
+function identifier(name: string): string {
   return `"${name.replaceAll('"', '""')}"`;
 }
+
+export { identifier, literal };

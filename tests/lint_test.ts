@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import strict from "../lint/strict.ts";
+import strict from "@/lint/strict.ts";
 
 const ASSERTION = "Narrow the value or parse it instead of asserting its type.";
 const COMMENT = "Put the meaning in names, types and tests. A comment needs an https link that proves it.";
