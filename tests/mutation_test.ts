@@ -62,6 +62,20 @@ const WORKERS_TEST = `Deno.test("runs in 1 of N copies, where N is the CPU threa
 });
 `;
 
+const FLAGS = `export const first: boolean = true;
+export const unused: boolean = true;
+export const both: boolean = true;
+`;
+
+function loggingTest(name: string, failure: string): string {
+  return `import { both, first } from "../flags.ts";
+Deno.test("${name}", async () => {
+  await Deno.writeTextFile(String(Deno.env.get("ORDER_LOG")), "${name}\\n", { append: true });
+  if (${failure}) throw new Error("${name} caught the mutant");
+});
+`;
+}
+
 async function fixture(tests: Readonly<Record<string, string>>): Promise<string> {
   const root = await Deno.makeTempDir();
   await Deno.mkdir(`${root}/tests`);
@@ -131,6 +145,23 @@ Deno.test("runs the listed tests that load the file of each mutant, every listed
   assertEquals(leftovers.flat(), []);
   assertEquals(await Deno.readTextFile(`${root}/math.ts`), MATH);
   await Deno.remove(root, { recursive: true });
+});
+
+Deno.test("runs first the test that caught the last mutant of the same file, with the same outcomes", async () => {
+  const root = await fixture({
+    "a_test.ts": loggingTest("a", "!both"),
+    "b_test.ts": loggingTest("b", "!first || !both"),
+  });
+  await Deno.writeTextFile(`${root}/flags.ts`, FLAGS);
+  const log = await Deno.makeTempFile();
+  const results = await withEnv(
+    { ORDER_LOG: log },
+    async () =>
+      await runMutants(root, mutantsOf("flags.ts", FLAGS), ["tests/a_test.ts", "tests/b_test.ts"], ONE_WORKER),
+  );
+  assertEquals(results.map(({ outcome }) => outcome), ["killed", "survived", "killed"]);
+  assertEquals((await Deno.readTextFile(log)).trim().split("\n"), ["a", "b", "a", "b", "b", "a", "b"]);
+  await Promise.all([Deno.remove(root, { recursive: true }), Deno.remove(log)]);
 });
 
 Deno.test("refuses to mutate when the tests fail before any mutation", async () => {

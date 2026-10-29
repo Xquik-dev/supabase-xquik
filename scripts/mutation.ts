@@ -8,7 +8,7 @@ interface Result {
 }
 
 const TEST_PERMISSIONS = ["--allow-read", "--allow-write", "--allow-run", "--allow-env", "--allow-net"];
-const RAN_TESTS = /^running \d+ tests? from /mu;
+const RAN_TEST = /(?<=^running \d+ tests? from \.\/).+$/gmu;
 const SOURCE_LINE = /^SF:.+$/gmu;
 const TIMEOUT_FACTOR = 5;
 const MS_PER_SECOND = 1000;
@@ -20,6 +20,7 @@ const BASELINE_TIMEOUT_MS = BASELINE_TIMEOUT_MINUTES * SECONDS_PER_MINUTE * MS_P
 const NONE = 0;
 const TEXT_START = 0;
 const MINIMUM_WORKERS = 1;
+const LAST = -1;
 const FULL_SCORE = 100;
 const HUNDREDTHS_PER_WHOLE = 10_000;
 const HUNDREDTHS_PER_PERCENT = 100;
@@ -43,7 +44,7 @@ async function copyTree(from: string, to: string): Promise<void> {
 
 interface TestRun {
   readonly passed: boolean;
-  readonly compiled: boolean;
+  readonly ran: readonly string[];
   readonly output: string;
   readonly ms: number;
 }
@@ -72,7 +73,7 @@ async function runTests(
   const decoder = new TextDecoder();
   const output = `${decoder.decode(stdout)}${decoder.decode(stderr)}`;
   const { duration } = performance.measure(dir, { start: started });
-  return { compiled: RAN_TESTS.test(output), ms: duration, output, passed: success };
+  return { ms: duration, output, passed: success, ran: [...output.matchAll(RAN_TEST)].map(([test]) => test) };
 }
 
 async function cover(dir: string, test: string, report: string): Promise<Covered> {
@@ -115,6 +116,10 @@ function testsFor(file: string, covered: readonly Covered[]): readonly Covered[]
   return covered;
 }
 
+function killerFirst(tests: readonly Covered[], killer: string | undefined): readonly Covered[] {
+  return [...tests.filter(({ test }) => test === killer), ...tests.filter(({ test }) => test !== killer)];
+}
+
 function mutantTimeoutMs(baselineMs: readonly number[]): number {
   return MINIMUM_TIMEOUT_MS + TIMEOUT_FACTOR * baselineMs.reduce((total, ms) => total + ms, NONE);
 }
@@ -123,7 +128,7 @@ function outcomeOf(run: TestRun): Outcome {
   if (run.passed) {
     return "survived";
   }
-  if (run.compiled) {
+  if (run.ran.length > NONE) {
     return "killed";
   }
   return "invalid";
@@ -144,14 +149,19 @@ async function runMutants(
       return `${scratch}/${String(index)}`;
     }));
     const covered = await pool(tests, copies, async (dir, test) => await cover(dir, test, `${dir}.coverage/${test}`));
+    const killers = new Map<string, string>();
     return await pool(mutants, copies, async (dir, mutant): Promise<Result> => {
-      const chosen = testsFor(mutant.file, covered);
+      const chosen = killerFirst(testsFor(mutant.file, covered), killers.get(mutant.file));
       const path = `${dir}/${mutant.file}`;
       const original = await Deno.readTextFile(path);
       const mutated = original.slice(TEXT_START, mutant.start) + mutant.replacement + original.slice(mutant.end);
       await Deno.writeTextFile(path, mutated);
       const run = await runTests(dir, chosen.map(({ test }) => test), mutantTimeoutMs(chosen.map(({ ms }) => ms)));
       await Deno.writeTextFile(path, original);
+      const killer = run.ran.at(LAST);
+      if (!run.passed && typeof killer === "string") {
+        killers.set(mutant.file, killer);
+      }
       return { mutant, outcome: outcomeOf(run) };
     });
   } finally {
