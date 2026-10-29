@@ -1,11 +1,22 @@
 import { assertEquals } from "@std/assert";
+import readDir from "@/scripts/read_dir.ts";
 
-type Outcome = { success: boolean; points: string | null; planted: string[] | string | null };
+interface Outcome {
+  planted: string[] | string | null;
+  points: string | null;
+  success: boolean;
+}
 
-function contents(path: string): string[] | string | null {
-  const stat = Deno.lstatSync(path);
-  if (stat.isDirectory) return [...Deno.readDirSync(path)].map((entry) => entry.name);
-  return stat.isFile ? Deno.readTextFileSync(path) : null;
+async function contents(path: string): Promise<string[] | string | null> {
+  const stat = await Deno.lstat(path);
+  if (stat.isDirectory) {
+    const entries = await Array.fromAsync(readDir(path));
+    return entries.map(({ name }) => name);
+  }
+  if (stat.isFile) {
+    return await Deno.readTextFile(path);
+  }
+  return null;
 }
 
 async function ownLink(prepare: (link: string) => Promise<void>): Promise<Outcome> {
@@ -16,7 +27,7 @@ async function ownLink(prepare: (link: string) => Promise<void>): Promise<Outcom
     const { success } = await new Deno.Command("bin/own-link", { args: [`${dir}/target`, link], stderr: "null" })
       .output();
     const points = await Deno.readLink(link).then((target) => target.replace(dir, "<dir>"), () => null);
-    return { success, points, planted: contents(link) };
+    return { planted: await contents(link), points, success };
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
@@ -27,7 +38,7 @@ Deno.test("own-link makes the link when nothing is at its path", async () => {
     await ownLink(async () => {
       await Promise.resolve();
     }),
-    { success: true, points: "<dir>/target", planted: null },
+    { planted: null, points: "<dir>/target", success: true },
   );
 });
 
@@ -36,11 +47,7 @@ Deno.test("own-link points a link this user owns at the target", async () => {
     await ownLink(async (link) => {
       await Deno.symlink("/elsewhere", link);
     }),
-    {
-      success: true,
-      points: "<dir>/target",
-      planted: null,
-    },
+    { planted: null, points: "<dir>/target", success: true },
   );
 });
 
@@ -49,11 +56,7 @@ Deno.test("own-link refuses a planted file and leaves it unchanged", async () =>
     await ownLink(async (link) => {
       await Deno.writeTextFile(link, "planted");
     }),
-    {
-      success: false,
-      points: null,
-      planted: "planted",
-    },
+    { planted: "planted", points: null, success: false },
   );
 });
 
@@ -62,6 +65,6 @@ Deno.test("own-link refuses a planted directory and leaves it empty", async () =
     await ownLink(async (link) => {
       await Deno.mkdir(link);
     }),
-    { success: false, points: null, planted: [] },
+    { planted: [], points: null, success: false },
   );
 });

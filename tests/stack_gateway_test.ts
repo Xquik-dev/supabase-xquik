@@ -1,118 +1,150 @@
 import { assert, assertEquals } from "@std/assert";
-import { bearerToken, gateway, type GatewayConfig } from "./stack/gateway.ts";
+import { bearerToken, forward } from "@/tests/stack/gateway.ts";
+import type { GatewayConfig } from "@/tests/stack/gateway.ts";
 
-const KEYS = { secret: "sb_secret_s", publishable: "sb_publishable_p", serviceRole: "service-jwt", anon: "anon-jwt" };
+const KEYS = { anon: "anon-jwt", publishable: "sb_publishable_p", secret: "sb_secret_s", serviceRole: "service-jwt" };
+const CREATED = 201;
+const NOT_FOUND = 404;
+const ATTEMPTS = 100;
+const ONE_ATTEMPT = 1;
+const POLL_MS = 100;
+const KILL_AFTER_MS = 5000;
 
-type Forwarded = { method: string; path: string; authorization: string | null; apiKey: string | null; body: string };
+interface Forwarded {
+  apiKey: string | null;
+  authorization: string | null;
+  body: string;
+  method: string;
+  path: string;
+}
 
-function upstream(): { url: string; forwarded: Forwarded[]; server: Deno.HttpServer } {
+interface Upstream {
+  forwarded: Forwarded[];
+  server: Deno.HttpServer;
+  url: string;
+}
+
+async function upstream(): Promise<Upstream> {
   const forwarded: Forwarded[] = [];
-  const server = Deno.serve({ hostname: "127.0.0.1", port: 0, onListen: () => {} }, async (request) => {
+  const listening = Promise.withResolvers<string>();
+  const server = Deno.serve({
+    hostname: "127.0.0.1",
+    onListen: ({ hostname, port }) => {
+      listening.resolve(`http://${hostname}:${String(port)}/`);
+    },
+    port: 0,
+  }, async (request) => {
     const url = new URL(request.url);
     forwarded.push({
+      apiKey: request.headers.get("sb-api-key"),
+      authorization: request.headers.get("authorization"),
+      body: await request.text(),
       method: request.method,
       path: `${url.pathname}${url.search}`,
-      authorization: request.headers.get("authorization"),
-      apiKey: request.headers.get("sb-api-key"),
-      body: await request.text(),
     });
-    return new Response("answered", { status: 201 });
+    return new Response("answered", { status: CREATED });
   });
-  return { url: `http://127.0.0.1:${String(server.addr.port)}/`, forwarded, server };
+  return { forwarded, server, url: await listening.promise };
 }
 
 function config(url: string, port = 0): GatewayConfig {
   return {
+    keys: KEYS,
     port,
     routes: [
-      { prefix: "/rest/v1/", upstream: url, header: "authorization" },
-      { prefix: "/functions/v1/", upstream: url, header: "sb-api-key" },
+      { header: "authorization", prefix: "/rest/v1/", upstream: url },
+      { header: "sb-api-key", prefix: "/functions/v1/", upstream: url },
     ],
-    keys: KEYS,
   };
+}
+
+function freePort(): number {
+  const listener = Deno.listen({ hostname: "127.0.0.1", port: 0 });
+  const { port } = listener.addr;
+  listener.close();
+  return port;
+}
+
+function spawnGateway(settings: GatewayConfig): Deno.ChildProcess {
+  const script = new URL("stack/gateway.ts", import.meta.url).pathname;
+  const args = ["run", "--allow-net", script, JSON.stringify(settings)];
+  return new Deno.Command(Deno.execPath(), { args, stdout: "null" }).spawn();
+}
+
+async function answer(url: string, attempts: number): Promise<Response | null> {
+  const reply = await fetch(url, { headers: { apikey: KEYS.publishable } }).catch(() => null);
+  if (reply !== null || attempts === ONE_ATTEMPT) {
+    return reply;
+  }
+  const { promise, resolve } = Promise.withResolvers<number>();
+  setTimeout(resolve, POLL_MS, attempts);
+  await promise;
+  return await answer(url, attempts - ONE_ATTEMPT);
+}
+
+async function stopped(child: Deno.ChildProcess): Promise<boolean> {
+  child.kill("SIGTERM");
+  const deadline = setTimeout(() => {
+    child.kill("SIGKILL");
+  }, KILL_AFTER_MS);
+  const { success } = await child.status;
+  clearTimeout(deadline);
+  return success;
 }
 
 Deno.test("bearerToken maps API keys to JWTs the way the Supabase CLI's Kong does", () => {
   const token = (headers: Record<string, string>): string | null => bearerToken(new Headers(headers), KEYS);
-  assertEquals(token({ authorization: "Bearer user-jwt", apikey: KEYS.secret }), "Bearer user-jwt");
-  assertEquals(token({ authorization: `Bearer ${KEYS.secret}`, apikey: KEYS.secret }), "Bearer service-jwt");
+  assertEquals(token({ apikey: KEYS.secret, authorization: "Bearer user-jwt" }), "Bearer user-jwt");
+  assertEquals(token({ apikey: KEYS.secret, authorization: `Bearer ${KEYS.secret}` }), "Bearer service-jwt");
   assertEquals(token({ apikey: KEYS.publishable }), "Bearer anon-jwt");
   assertEquals(token({ apikey: "legacy-jwt" }), "legacy-jwt");
   assertEquals(token({}), null);
 });
 
-Deno.test("gateway strips the route prefix, sets the route header and forwards the method and body", async () => {
-  const { url, forwarded, server } = upstream();
+Deno.test("forward strips the route prefix, sets the route header and forwards the method and body", async () => {
+  const { forwarded, server, url } = await upstream();
   try {
-    const handle = gateway(config(url));
-    const posted = await handle(
+    const settings = config(url);
+    const posted = await forward(
       new Request("http://gateway/rest/v1/xquik_events?select=id", {
-        method: "POST",
-        headers: { apikey: KEYS.secret },
         body: '{"id": 1}',
+        headers: { apikey: KEYS.secret },
+        method: "POST",
       }),
+      settings,
     );
-    assertEquals([posted.status, await posted.text()], [201, "answered"]);
-    const fetched = await handle(
-      new Request("http://gateway/functions/v1/xquik-webhook", { headers: { apikey: KEYS.publishable } }),
-    );
-    await fetched.body?.cancel();
-    const missing = await handle(new Request("http://gateway/auth/v1/user"));
-    assertEquals(missing.status, 404);
-    assertEquals(forwarded, [
+    assertEquals([posted.status, await posted.text()], [CREATED, "answered"]);
+    const published = { headers: { apikey: KEYS.publishable } };
+    await (await forward(new Request("http://gateway/functions/v1/xquik-webhook", published), settings)).body?.cancel();
+    const missing = await forward(new Request("http://gateway/auth/v1/user"), settings);
+    assertEquals([missing.status, forwarded], [NOT_FOUND, [
       {
+        apiKey: null,
+        authorization: "Bearer service-jwt",
+        body: '{"id": 1}',
         method: "POST",
         path: "/xquik_events?select=id",
-        authorization: "Bearer service-jwt",
-        apiKey: null,
-        body: '{"id": 1}',
       },
-      { method: "GET", path: "/xquik-webhook", authorization: null, apiKey: "Bearer anon-jwt", body: "" },
-    ]);
+      { apiKey: "Bearer anon-jwt", authorization: null, body: "", method: "GET", path: "/xquik-webhook" },
+    ]]);
   } finally {
     await server.shutdown();
   }
 });
 
 Deno.test("the gateway script serves its JSON config and stops on SIGTERM", async () => {
-  const { url, forwarded, server } = upstream();
-  const listener = Deno.listen({ hostname: "127.0.0.1", port: 0 });
-  const port = listener.addr.port;
-  listener.close();
-  const child = new Deno.Command(Deno.execPath(), {
-    args: [
-      "run",
-      "--allow-net",
-      new URL("./stack/gateway.ts", import.meta.url).pathname,
-      JSON.stringify(config(url, port)),
-    ],
-    stdout: "null",
-  }).spawn();
+  const { forwarded, server, url } = await upstream();
+  const port = freePort();
+  const child = spawnGateway(config(url, port));
   try {
-    let answer: Response | undefined;
-    for (let attempt = 0; attempt < 100 && answer === undefined; attempt++) {
-      answer = await fetch(`http://127.0.0.1:${String(port)}/rest/v1/xquik_actions`, {
-        headers: { apikey: KEYS.publishable },
-      })
-        .catch(async () => {
-          await new Promise((resolve) => {
-            setTimeout(resolve, 100);
-          });
-          return undefined;
-        });
-    }
-    assertEquals(await answer?.text(), "answered");
-    assertEquals(forwarded.map(({ path, authorization }) => `${path} ${String(authorization)}`), [
+    const reply = await answer(`http://127.0.0.1:${String(port)}/rest/v1/xquik_actions`, ATTEMPTS);
+    assertEquals(await reply?.text(), "answered");
+    assertEquals(forwarded.map(({ authorization, path }) => `${path} ${String(authorization)}`), [
       "/xquik_actions Bearer anon-jwt",
     ]);
   } finally {
-    child.kill("SIGTERM");
-    const deadline = setTimeout(() => {
-      child.kill("SIGKILL");
-    }, 5000);
-    const { success } = await child.status;
-    clearTimeout(deadline);
+    const exited = await stopped(child);
     await server.shutdown();
-    assert(success, "the gateway exits cleanly within 5 seconds of SIGTERM");
+    assert(exited, "the gateway exits cleanly within 5 seconds of SIGTERM");
   }
 });

@@ -1,44 +1,61 @@
+import parseJson from "@shared/json.ts";
 import { z } from "zod";
 
-const config = z.object({
-  port: z.number().int(),
-  routes: z.array(z.object({ prefix: z.string(), upstream: z.url(), header: z.string() })),
-  keys: z.object({ secret: z.string(), publishable: z.string(), serviceRole: z.string(), anon: z.string() }),
-});
-export type GatewayConfig = z.infer<typeof config>;
+const NOT_FOUND = 404;
+const KEY_BEARER = "Bearer sb_";
 
-export function bearerToken(headers: Headers, keys: GatewayConfig["keys"]): string | null {
+const text = z.string();
+const keySet = z.object({ anon: text, publishable: text, secret: text, serviceRole: text });
+const route = z.object({ header: text, prefix: text, upstream: z.url() });
+const config = z.object({ keys: keySet, port: z.number().int(), routes: z.array(route) });
+type GatewayConfig = z.infer<typeof config>;
+type Keys = z.infer<typeof keySet>;
+
+function bearerToken(headers: Headers, { anon, publishable, secret, serviceRole }: Keys): string | null {
   const authorization = headers.get("authorization");
-  if (authorization !== null && !authorization.startsWith("Bearer sb_")) return authorization;
+  if (authorization !== null && !authorization.startsWith(KEY_BEARER)) {
+    return authorization;
+  }
   const apiKey = headers.get("apikey");
-  if (apiKey === keys.secret) return `Bearer ${keys.serviceRole}`;
-  if (apiKey === keys.publishable) return `Bearer ${keys.anon}`;
+  if (apiKey === secret) {
+    return `Bearer ${serviceRole}`;
+  }
+  if (apiKey === publishable) {
+    return `Bearer ${anon}`;
+  }
   return apiKey;
 }
 
-export function gateway({ routes, keys }: GatewayConfig): (request: Request) => Promise<Response> {
-  return async (request) => {
-    const url = new URL(request.url);
-    const route = routes.find(({ prefix }) => url.pathname.startsWith(prefix));
-    if (route === undefined) return new Response(null, { status: 404 });
-    const headers = new Headers(request.headers);
-    const token = bearerToken(request.headers, keys);
-    if (token !== null) headers.set(route.header, token);
-    return await fetch(new URL(`${url.pathname.slice(route.prefix.length)}${url.search}`, route.upstream), {
-      method: request.method,
-      headers,
-      body: request.body === null ? null : await request.arrayBuffer(),
-      redirect: "manual",
-    });
-  };
+async function forward(request: Request, { keys, routes }: GatewayConfig): Promise<Response> {
+  const url = new URL(request.url);
+  const matched = routes.find(({ prefix }) => url.pathname.startsWith(prefix)) ?? null;
+  if (matched === null) {
+    return new Response(null, { status: NOT_FOUND });
+  }
+  const headers = new Headers(request.headers);
+  const token = bearerToken(request.headers, keys);
+  if (token !== null) {
+    headers.set(matched.header, token);
+  }
+  const init: RequestInit = { headers, method: request.method, redirect: "manual" };
+  if (request.body !== null) {
+    init.body = await request.arrayBuffer();
+  }
+  return await fetch(new URL(`${url.pathname.slice(matched.prefix.length)}${url.search}`, matched.upstream), init);
 }
 
 if (import.meta.main) {
-  const [json] = z.tuple([z.string()]).parse(Deno.args);
-  const parsed = config.parse(JSON.parse(json));
+  const [json] = z.tuple([text]).parse(Deno.args);
+  const parsed = config.parse(parseJson(json));
   const stop = new AbortController();
   Deno.addSignalListener("SIGTERM", () => {
     stop.abort();
   });
-  Deno.serve({ hostname: "127.0.0.1", port: parsed.port, signal: stop.signal, onListen: () => {} }, gateway(parsed));
+  Deno.serve(
+    { hostname: "127.0.0.1", port: parsed.port, signal: stop.signal },
+    async (request) => await forward(request, parsed),
+  );
 }
+
+export { bearerToken, forward };
+export type { GatewayConfig };
