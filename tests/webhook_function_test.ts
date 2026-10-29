@@ -1,166 +1,222 @@
+import { answersInOrder, post, randomNonce, sampleEvent, SECRET, signDelivery, TEST_ALERT } from "./delivery.ts";
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { post, randomNonce, sampleEvent, SECRET, signDelivery, TEST_ALERT } from "./delivery.ts";
+import parseJson from "@shared/json.ts";
 
 const FUNCTION = new URL("../supabase/functions/xquik-webhook/index.ts", import.meta.url);
 const SERVICE_ROLE_KEY = "service-role-key";
 const STORE_DOWN = "store-down";
-const BARE_EVENT = { eventType: "tweet.new", streamEventId: "9002", occurredAt: "2026-10-28T19:00:00Z" };
-const CONNECTION: Deno.ServeHandlerInfo = {
-  remoteAddr: { transport: "tcp", hostname: "127.0.0.1", port: 0 },
-  completed: Promise.resolve(),
+const BARE_EVENT = { eventType: "tweet.new", occurredAt: "2026-10-28T19:00:00Z", streamEventId: "9002" };
+const NASA_EVENT = {
+  data: { id: "1893456789012345678", text: "Liftoff." },
+  deliveryId: "502",
+  eventType: "tweet.new",
+  monitorId: "10",
+  monitorType: "account",
+  occurredAt: "2026-02-24T14:22:00.000Z",
+  schemaVersion: 1,
+  streamEventId: "9001",
+  username: "NASA",
+  xUserId: "11348282",
 };
+const CONNECTION: Deno.ServeHandlerInfo = {
+  completed: Promise.resolve(),
+  remoteAddr: { hostname: "127.0.0.1", port: 0, transport: "tcp" },
+};
+const EXIT_FAILURE = 1;
+const LAST = -1;
 
 type Handler = (request: Request) => Promise<Response>;
-type Received = {
+interface Received {
   readonly table: string;
   readonly apiKey: string | null;
   readonly query: string;
   readonly prefer: string | null;
   readonly body: unknown;
-};
-type Postgrest = { readonly url: string; readonly received: Received[]; readonly server: Deno.HttpServer };
+}
+interface Postgrest {
+  readonly url: string;
+  readonly received: Received[];
+  readonly server: Deno.HttpServer;
+}
+interface FakeTable {
+  readonly column: string;
+  readonly inserted: (key: unknown) => Response;
+  readonly keys: Set<unknown>;
+  readonly repeated: () => Response;
+}
+interface FakeState {
+  readonly received: Received[];
+  readonly tables: ReadonlyMap<string, FakeTable>;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function fakePostgrest(): Postgrest {
-  const keys = { "xquik_webhook_nonces": new Set<unknown>(), "xquik_events": new Set<unknown>() };
-  const received: Received[] = [];
-  const server = Deno.serve({ hostname: "127.0.0.1", port: 0, onListen: () => {} }, async (request) => {
-    const { pathname, search } = new URL(request.url);
-    const table = pathname.replace("/rest/v1/", "");
-    const body = await request.json();
-    const { headers } = request;
-    received.push({ table, apiKey: headers.get("apikey"), query: search, prefer: headers.get("prefer"), body });
-    const row = isRecord(body) ? body : {};
-    const isNonce = table === "xquik_webhook_nonces";
-    const key = isNonce ? row["nonce"] : row["stream_event_id"];
-    if (key === STORE_DOWN) return Response.json({ code: "XX000", message: "The store is down." }, { status: 500 });
-    const seen = isNonce ? keys.xquik_webhook_nonces : keys.xquik_events;
-    const isNew = !seen.has(key);
-    seen.add(key);
-    if (!isNonce) return Response.json(isNew ? [{ stream_event_id: key }] : [], { status: 201 });
-    return isNew
-      ? new Response(null, { status: 201 })
-      : Response.json({ code: "23505", message: "duplicate key value" }, { status: 409 });
-  });
-  return { url: `http://127.0.0.1:${String(server.addr.port)}`, received, server };
+function fakeTables(): ReadonlyMap<string, FakeTable> {
+  return new Map<string, FakeTable>([
+    ["xquik_events", {
+      column: "stream_event_id",
+      inserted: (key: unknown): Response => Response.json([{ stream_event_id: key }], { status: 201 }),
+      keys: new Set(),
+      repeated: (): Response => Response.json([], { status: 201 }),
+    }],
+    ["xquik_webhook_nonces", {
+      column: "nonce",
+      inserted: (): Response => new Response(null, { status: 201 }),
+      keys: new Set(),
+      repeated: (): Response => Response.json({ code: "23505", message: "duplicate key value" }, { status: 409 }),
+    }],
+  ]);
 }
 
-async function loadFunction(supabaseUrl: string, waits: Promise<unknown>[]): Promise<Handler> {
-  const serve = Deno.serve;
-  const served: Deno.ServeHandler[] = [];
+async function receive(request: Request, received: Received[]): Promise<Received> {
+  const { pathname, search } = new URL(request.url);
+  const entry: Received = {
+    apiKey: request.headers.get("apikey"),
+    body: parseJson(await request.text()),
+    prefer: request.headers.get("prefer"),
+    query: search,
+    table: pathname.replace("/rest/v1/", ""),
+  };
+  received.push(entry);
+  return entry;
+}
+
+function respond(fake: FakeTable, key: unknown): Response {
+  if (key === STORE_DOWN) {
+    return Response.json({ code: "XX000", message: "The store is down." }, { status: 500 });
+  }
+  if (fake.keys.has(key)) {
+    return fake.repeated();
+  }
+  fake.keys.add(key);
+  return fake.inserted(key);
+}
+
+async function answer(request: Request, { received, tables }: FakeState): Promise<Response> {
+  const { body, table } = await receive(request, received);
+  const fake = tables.get(table);
+  assert(fake, `the function writes only to the xquik tables, not ${table}`);
+  assert(isRecord(body), "the function sends PostgREST 1 JSON object");
+  return respond(fake, body[fake.column]);
+}
+
+async function fakePostgrest(): Promise<Postgrest> {
+  const received: Received[] = [];
+  const tables = fakeTables();
+  const listening = Promise.withResolvers<string>();
+  const server = Deno.serve({
+    hostname: "127.0.0.1",
+    onListen: ({ hostname, port }) => {
+      listening.resolve(`http://${hostname}:${String(port)}`);
+    },
+    port: 0,
+  }, async (request) => await answer(request, { received, tables }));
+  return { received, server, url: await listening.promise };
+}
+
+function configure(supabaseUrl: string): void {
   Deno.env.set("XQUIK_WEBHOOK_SECRET", SECRET);
   Deno.env.set("SUPABASE_URL", supabaseUrl);
   Deno.env.set("SUPABASE_SERVICE_ROLE_KEY", SERVICE_ROLE_KEY);
-  Object.defineProperty(globalThis, "EdgeRuntime", {
-    value: { waitUntil: (promise: Promise<unknown>) => waits.push(promise) },
-    configurable: true,
-  });
+}
+
+async function loadFunction(supabaseUrl: string): Promise<Handler> {
+  const { serve } = Deno;
+  const served: Deno.ServeHandler[] = [];
+  configure(supabaseUrl);
   Object.defineProperty(Deno, "serve", {
-    value: (handler: Deno.ServeHandler) => served.push(handler),
     configurable: true,
+    value: (handler: Deno.ServeHandler) => served.push(handler),
   });
   try {
-    await import("../supabase/functions/xquik-webhook/index.ts");
+    await import("@/supabase/functions/xquik-webhook/index.ts");
   } finally {
-    Object.defineProperty(Deno, "serve", { value: serve, configurable: true });
+    Object.defineProperty(Deno, "serve", { configurable: true, value: serve });
   }
   const [handler] = served;
-  assert(handler !== undefined, "the function passes a handler to Deno.serve");
+  assert(handler, "the function passes a handler to Deno.serve");
   return async (request) => await handler(request, CONNECTION);
 }
 
 async function signedPost(body: unknown, nonce = randomNonce()): Promise<Request> {
-  return post(await signDelivery(JSON.stringify(body), { timestamp: String(Date.now()), nonce }));
+  const signed = await signDelivery(JSON.stringify(body), { nonce, timestamp: String(Date.now()) });
+  return post(signed);
+}
+
+function assertUpserts(received: readonly Received[]): void {
+  const upserts = received.filter(({ table }) => table === "xquik_events");
+  assertEquals(
+    new Set(upserts.map(({ query, prefer }) => `${query} ${String(prefer)}`)),
+    new Set([
+      "?on_conflict=stream_event_id&select=stream_event_id resolution=ignore-duplicates, return=representation",
+    ]),
+  );
+}
+
+function assertReceived(received: readonly Received[]): void {
+  assertEquals(new Set(received.map((request) => request.apiKey)), new Set([SERVICE_ROLE_KEY]));
+  assertEquals(received.map((request) => request.table), [
+    "xquik_webhook_nonces",
+    "xquik_events",
+    "xquik_webhook_nonces",
+    "xquik_events",
+    "xquik_webhook_nonces",
+    "xquik_webhook_nonces",
+    "xquik_webhook_nonces",
+    "xquik_webhook_nonces",
+    "xquik_events",
+    "xquik_webhook_nonces",
+    "xquik_events",
+  ]);
+  assertEquals(received.at(LAST)?.body, {
+    delivery_id: null,
+    event_type: "tweet.new",
+    monitor_id: null,
+    occurred_at: BARE_EVENT.occurredAt,
+    payload: BARE_EVENT,
+    stream_event_id: "9002",
+  });
+  assertEquals(received[1]?.body, {
+    delivery_id: "502",
+    event_type: "tweet.new",
+    monitor_id: "10",
+    occurred_at: "2026-02-24T14:22:00.000Z",
+    payload: NASA_EVENT,
+    stream_event_id: "9001",
+  });
+  assertUpserts(received);
 }
 
 Deno.test("the xquik-webhook function stores each event once through PostgREST as the service role", async () => {
-  const postgrest = fakePostgrest();
-  const waits: Promise<unknown>[] = [];
-  const logs: string[] = [];
-  const { log, error } = console;
-  console.log = (message: unknown): void => {
-    logs.push(`log ${String(message)}`);
-  };
-  console.error = (message: unknown): void => {
-    logs.push(`error ${String(message)}`);
-  };
+  const postgrest = await fakePostgrest();
   try {
-    const handle = await loadFunction(postgrest.url, waits);
+    const handle = await loadFunction(postgrest.url);
     const event = sampleEvent("tweet.new");
     const nonce = randomNonce();
-    const statuses = [
-      (await handle(await signedPost(event, nonce))).status,
-      (await handle(await signedPost(event))).status,
-      (await handle(await signedPost(event, nonce))).status,
-      (await handle(await signedPost(TEST_ALERT))).status,
-      (await handle(await signedPost(event, STORE_DOWN))).status,
-      (await handle(await signedPost(sampleEvent("tweet.new", { streamEventId: STORE_DOWN })))).status,
-      (await handle(new Request("http://localhost/functions/v1/xquik-webhook"))).status,
-      (await handle(await signedPost(BARE_EVENT))).status,
-    ];
-    await Promise.all(waits);
-    assertEquals(statuses, [200, 200, 401, 200, 503, 503, 405, 200]);
-    assertEquals(waits.length, 2);
-    assertEquals(logs, [
-      "log xquik-webhook stored tweet.new event 9001.",
-      "error xquik-webhook could not record the nonce. The store is down.",
-      "error xquik-webhook could not store the event. The store is down.",
-      "log xquik-webhook stored tweet.new event 9002.",
+    const requests = await Promise.all([
+      signedPost(event, nonce),
+      signedPost(event),
+      signedPost(event, nonce),
+      signedPost(TEST_ALERT),
+      signedPost(event, STORE_DOWN),
+      signedPost(sampleEvent("tweet.new", { streamEventId: STORE_DOWN })),
+      Promise.resolve(new Request("http://localhost/functions/v1/xquik-webhook")),
+      signedPost(BARE_EVENT),
     ]);
-    assertEquals(new Set(postgrest.received.map((request) => request.apiKey)), new Set([SERVICE_ROLE_KEY]));
-    assertEquals(postgrest.received.map((request) => request.table), [
-      "xquik_webhook_nonces",
-      "xquik_events",
-      "xquik_webhook_nonces",
-      "xquik_events",
-      "xquik_webhook_nonces",
-      "xquik_webhook_nonces",
-      "xquik_webhook_nonces",
-      "xquik_webhook_nonces",
-      "xquik_events",
-      "xquik_webhook_nonces",
-      "xquik_events",
+    assertEquals(await answersInOrder(handle, requests), [
+      "200 Stored the event.",
+      "200 Already stored this event.",
+      "401 This nonce was already used.",
+      "200 Received the test alert.",
+      "503 Could not store the delivery. Xquik will retry it.",
+      "503 Could not store the delivery. Xquik will retry it.",
+      "405 Send deliveries with POST.",
+      "200 Stored the event.",
     ]);
-    const upserts = postgrest.received.filter(({ table }) => table === "xquik_events");
-    assertEquals(
-      new Set(upserts.map(({ query, prefer }) => `${query} ${String(prefer)}`)),
-      new Set([
-        "?on_conflict=stream_event_id&select=stream_event_id resolution=ignore-duplicates, return=representation",
-      ]),
-    );
-    assertEquals(postgrest.received.at(-1)?.body, {
-      stream_event_id: "9002",
-      delivery_id: null,
-      event_type: "tweet.new",
-      monitor_id: null,
-      occurred_at: BARE_EVENT.occurredAt,
-      payload: BARE_EVENT,
-    });
-    assertEquals(postgrest.received[1]?.body, {
-      stream_event_id: "9001",
-      delivery_id: "502",
-      event_type: "tweet.new",
-      monitor_id: "10",
-      occurred_at: "2026-02-24T14:22:00.000Z",
-      payload: {
-        eventType: "tweet.new",
-        schemaVersion: 1,
-        deliveryId: "502",
-        streamEventId: "9001",
-        occurredAt: "2026-02-24T14:22:00.000Z",
-        monitorId: "10",
-        monitorType: "account",
-        username: "NASA",
-        xUserId: "11348282",
-        data: { id: "1893456789012345678", text: "Liftoff." },
-      },
-    });
+    assertReceived(postgrest.received);
   } finally {
-    console.log = log;
-    console.error = error;
     await postgrest.server.shutdown();
   }
 });
@@ -168,8 +224,8 @@ Deno.test("the xquik-webhook function stores each event once through PostgREST a
 Deno.test("the xquik-webhook function refuses to start without SUPABASE_URL", async () => {
   const output = await new Deno.Command(Deno.execPath(), {
     args: ["run", "--allow-env", "--allow-read", FUNCTION.pathname],
-    env: { XQUIK_WEBHOOK_SECRET: SECRET, SUPABASE_URL: "" },
+    env: { SUPABASE_URL: "", XQUIK_WEBHOOK_SECRET: SECRET },
   }).output();
-  assertEquals(output.code, 1);
+  assertEquals(output.code, EXIT_FAILURE);
   assertStringIncludes(new TextDecoder().decode(output.stderr), "Set SUPABASE_URL for the xquik-webhook function.");
 });

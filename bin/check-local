@@ -319,9 +319,11 @@ lint_type_aware() {
           | ([$package.specifier] + [$aliases[] | select(.value == $package.specifier) | .key])[] as $prefix
           | $package.exports | to_entries[]
           | { key: ($prefix + (.key | ltrimstr("."))), value: [$package.root + (.value | ltrimstr("./"))] } ] as $paths
+      | [ $config[0].imports | to_entries[] | select(.value | startswith("./"))
+          | { key: (.key + "*"), value: [.value + "*"] } ] as $locals
       | { compilerOptions: ($config[0].compilerOptions + { target: "esnext", module: "preserve",
             moduleResolution: "bundler", lib: ["esnext"], noEmit: true, allowImportingTsExtensions: true,
-            paths: ($paths | from_entries) }),
+            paths: ($paths + $locals | from_entries) }),
           files: (["deno.d.ts"] + $files) }' >tsconfig.json || exit
     OXLINT_TSGOLINT_PATH="${root}/node_modules/.bin/tsgolint" "${root}/node_modules/.bin/oxlint" \
       --type-aware --type-check --format=unix "${files[@]}"
@@ -353,6 +355,9 @@ run_check "types" "Type check" "Fix the type errors above." "${deno}" check
 run_check "100% typed, awaited promises" "Type coverage and floating promises" \
   "Give each value listed above a type without any, and await each promise listed above." type_coverage
 run_check "squawk" "SQL lint" "Fix the squawk findings above." lint_sql
+run_check "append-only migrations" "Migrations on main stay unchanged" \
+  "A database may have applied each migration listed above. Restore it and put the change in a new migration." \
+  git diff --exit-code --name-only --no-renames --diff-filter=DMT --merge-base origin/main -- supabase/migrations
 run_check "audit" "Dependency audit of deno.lock and bun.lock" \
   "Upgrade each package named above, then rerun." audit_dependencies
 run_check "tests" "Tests with 100% line, branch and function coverage" \

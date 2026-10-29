@@ -1,6 +1,6 @@
-export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
+type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
-export type Database = {
+interface Database {
   "public": {
     Tables: {
       "xquik_actions": {
@@ -88,26 +88,18 @@ export type Database = {
         Relationships: [];
       };
     };
-    Views: {
-      [_ in never]: never;
-    };
-    Functions: {
-      [_ in never]: never;
-    };
-    Enums: {
-      [_ in never]: never;
-    };
-    CompositeTypes: {
-      [_ in never]: never;
-    };
+    Views: Record<symbol, never>;
+    Functions: Record<symbol, never>;
+    Enums: Record<symbol, never>;
+    CompositeTypes: Record<symbol, never>;
   };
-};
+}
 
 type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">;
 
 type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">];
 
-export type Tables<
+type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
@@ -122,17 +114,17 @@ export type Tables<
     & DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
     & DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"]
   )[TableName] extends {
-    Row: infer R;
-  } ? R
+    Row: infer Row;
+  } ? Row
   : never
   : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     ? (DefaultSchema["Tables"] & DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
-      Row: infer R;
-    } ? R
+      Row: infer Row;
+    } ? Row
     : never
   : never;
 
-export type TablesInsert<
+type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
@@ -142,17 +134,17 @@ export type TablesInsert<
     : never = never,
 > = DefaultSchemaTableNameOrOptions extends { schema: keyof DatabaseWithoutInternals }
   ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
-    Insert: infer I;
-  } ? I
+    Insert: infer Insert;
+  } ? Insert
   : never
   : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
     ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
-      Insert: infer I;
-    } ? I
+      Insert: infer Insert;
+    } ? Insert
     : never
   : never;
 
-export type TablesUpdate<
+type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
@@ -162,17 +154,17 @@ export type TablesUpdate<
     : never = never,
 > = DefaultSchemaTableNameOrOptions extends { schema: keyof DatabaseWithoutInternals }
   ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
-    Update: infer U;
-  } ? U
+    Update: infer Update;
+  } ? Update
   : never
   : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
     ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
-      Update: infer U;
-    } ? U
+      Update: infer Update;
+    } ? Update
     : never
   : never;
 
-export type Enums<
+type Enums<
   DefaultSchemaEnumNameOrOptions extends { schema: keyof DatabaseWithoutInternals },
   EnumName extends DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
@@ -184,7 +176,7 @@ export type Enums<
     ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
   : never;
 
-export type CompositeTypes<
+type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends { schema: keyof DatabaseWithoutInternals },
   CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
@@ -196,8 +188,11 @@ export type CompositeTypes<
     ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
   : never;
 
-export const Constants = {
+const Constants = {
   "public": {
     Enums: {},
   },
 } as const;
+
+export type { CompositeTypes, Database, Enums, Json, Tables, TablesInsert, TablesUpdate };
+export { Constants };

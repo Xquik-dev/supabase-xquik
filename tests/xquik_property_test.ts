@@ -1,26 +1,45 @@
+import {
+  assert,
+  asyncProperty,
+  boolean,
+  constant,
+  constantFrom,
+  dictionary,
+  integer,
+  oneof,
+  property,
+  record,
+  string,
+  stringMatching,
+} from "fast-check";
 import { assertEquals, assertRejects } from "@std/assert";
-import * as fc from "fast-check";
-import { askDocs, type AskDocsInput } from "../supabase/functions/_shared/xquik.ts";
-import { identifier, literal } from "../scripts/sql.ts";
+import { identifier, literal } from "@/scripts/sql.ts";
+import type { Arbitrary } from "fast-check";
+import { askDocs } from "@shared/xquik.ts";
+import type { AskDocsInput } from "@shared/xquik.ts";
+import parseJson from "@shared/json.ts";
 
-const SEED = 20261028;
-const LISTS = ["results", "content", "structuredData"];
+const SEED = 20_261_028;
+const HTTP_OK = 200;
+const SENT_ONCE = 1;
+const LISTS = new Set(["results", "content", "structuredData"]);
 
-const key = fc.stringMatching(/^[a-z][a-zA-Z_]{0,11}$/).filter((name) => !LISTS.includes(name));
-const scalar = fc.oneof(fc.string({ unit: "grapheme" }), fc.integer(), fc.boolean(), fc.constant(null));
-const fields = fc.dictionary(key, scalar);
-const quotable = fc.oneof(
-  fc.string({ unit: "binary" }),
-  fc.string({ unit: fc.constantFrom("'", '"', "\\", " ", "a") }),
+const key = stringMatching(/^[a-z][a-zA-Z_]{0,11}$/u).filter((name) => !LISTS.has(name));
+const scalar = oneof(string({ unit: "grapheme" }), integer(), boolean(), constant(null));
+const fields = dictionary(key, scalar);
+const quotable = oneof(
+  string({ unit: "binary" }),
+  string({ unit: constantFrom("'", '"', "\\", " ", "a") }),
 );
-const input: fc.Arbitrary<AskDocsInput> = fc.record({
-  query: fc.oneof(
-    fc.string({ unit: "grapheme" }),
-    fc.string({ unit: fc.constantFrom(" ", "&", "=", "+", "%", "#", "?", "/", "a") }),
-  ),
-  site: fc.constantFrom("docs.xquik.com", "xquik.com"),
-  mode: fc.constant("list"),
-  "response_format": fc.constantFrom("chatgpt_app", "conversational_search"),
+const query = oneof(
+  string({ unit: "grapheme" }),
+  string({ unit: constantFrom(" ", "&", "=", "+", "%", "#", "?", "/", "a") }),
+);
+const input: Arbitrary<AskDocsInput> = record({
+  mode: constant("list"),
+  query,
+  "response_format": constantFrom("chatgpt_app", "conversational_search"),
+  site: constantFrom("docs.xquik.com", "xquik.com"),
 }, { requiredKeys: ["query"] });
 
 function answering(status: number, body: unknown, seen: URL[] = []): typeof fetch {
@@ -30,18 +49,23 @@ function answering(status: number, body: unknown, seen: URL[] = []): typeof fetc
   };
 }
 
-function unquoted(quoted: string, quote: string): string | undefined {
-  const inner = quoted.startsWith(quote) && quoted.endsWith(quote) ? quoted.slice(1, -1) : undefined;
-  return inner?.split(quote.repeat(2)).some((part) => part.includes(quote)) === false
-    ? inner.replaceAll(quote.repeat(2), quote)
-    : undefined;
+function unquoted(quoted: string, quote: string): string | null {
+  if (!quoted.startsWith(quote) || !quoted.endsWith(quote)) {
+    return null;
+  }
+  const doubled = `${quote}${quote}`;
+  const inner = quoted.slice(quote.length, -quote.length);
+  if (inner.split(doubled).some((part) => part.includes(quote))) {
+    return null;
+  }
+  return inner.replaceAll(doubled, quote);
 }
 
 Deno.test("askDocs sends every input field as its own query parameter of a GET", async () => {
-  await fc.assert(
-    fc.asyncProperty(input, async (asked) => {
+  await assert(
+    asyncProperty(input, async (asked) => {
       const seen: URL[] = [];
-      await askDocs(asked, { fetch: answering(200, { _meta: {} }, seen) });
+      await askDocs(asked, { fetch: answering(HTTP_OK, { _meta: {} }, seen) });
       assertEquals(seen.map((url) => [url.origin + url.pathname, Object.fromEntries(url.searchParams)]), [
         ["https://xquik.com/ask", { ...asked }],
       ]);
@@ -51,18 +75,18 @@ Deno.test("askDocs sends every input field as its own query parameter of a GET",
 });
 
 Deno.test("askDocs sends every input as the JSON body of a POST with no query", async () => {
-  await fc.assert(
-    fc.asyncProperty(input, async (asked) => {
+  await assert(
+    asyncProperty(input, async (asked) => {
       const sent: Request[] = [];
       const fetch: typeof globalThis.fetch = async (url, init) => {
         sent.push(new Request(url, init));
         return await Promise.resolve(Response.json({ _meta: {} }));
       };
-      await askDocs(asked, { method: "POST", fetch });
+      await askDocs(asked, { fetch, method: "POST" });
       const [request = new Request("https://unsent.invalid")] = sent;
-      const body: unknown = await request.json();
+      const body: unknown = parseJson(await request.text());
       assertEquals([sent.length, request.method, request.url, request.headers.get("content-type"), body], [
-        1,
+        SENT_ONCE,
         "POST",
         "https://xquik.com/ask",
         "application/json",
@@ -74,27 +98,31 @@ Deno.test("askDocs sends every input as the JSON body of a POST with no query", 
 });
 
 Deno.test("askDocs returns every answer that carries its _meta object, with every other field", async () => {
-  await fc.assert(
-    fc.asyncProperty(fields, fields, async (meta, rest) => {
+  await assert(
+    asyncProperty(fields, fields, async (meta, rest) => {
       const body = { ...rest, _meta: meta };
-      assertEquals(await askDocs({ query: "q" }, { fetch: answering(200, body) }), body);
+      assertEquals(await askDocs({ query: "q" }, { fetch: answering(HTTP_OK, body) }), body);
     }),
     { seed: SEED },
   );
 });
 
 Deno.test("askDocs rejects every answer without its _meta object", async () => {
-  await fc.assert(
-    fc.asyncProperty(fields, async (body) => {
-      await assertRejects(async () => await askDocs({ query: "q" }, { fetch: answering(200, body) }), Error, "_meta");
+  await assert(
+    asyncProperty(fields, async (body) => {
+      await assertRejects(
+        async () => await askDocs({ query: "q" }, { fetch: answering(HTTP_OK, body) }),
+        Error,
+        "_meta",
+      );
     }),
     { seed: SEED },
   );
 });
 
 Deno.test("literal quotes every string so a SQL reader gets the same string back", () => {
-  fc.assert(
-    fc.property(quotable, (text) => {
+  assert(
+    property(quotable, (text) => {
       assertEquals(unquoted(literal(text), "'"), text);
     }),
     { seed: SEED },
@@ -102,8 +130,8 @@ Deno.test("literal quotes every string so a SQL reader gets the same string back
 });
 
 Deno.test("identifier quotes every name so a SQL reader gets the same name back", () => {
-  fc.assert(
-    fc.property(quotable, (name) => {
+  assert(
+    property(quotable, (name) => {
       assertEquals(unquoted(identifier(name), '"'), name);
     }),
     { seed: SEED },

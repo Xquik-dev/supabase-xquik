@@ -1,18 +1,25 @@
-import type { Operation } from "./openapi.ts";
 import { identifier, literal } from "./sql.ts";
+import type { Operation, Parameter } from "./openapi.ts";
 
-export const FOREIGN_TABLES_SUFFIX = "_xquik_foreign_tables.sql";
+const FOREIGN_TABLES_SUFFIX = "_xquik_foreign_tables.sql";
+const UPPERCASE = /[A-Z]/gv;
 
 type ColumnType = "text" | "bigint" | "double precision" | "boolean";
+type Option = readonly [name: string, value: string];
 
-export type ForeignTable = {
+interface Column {
+  readonly name: string;
+  readonly type: ColumnType;
+}
+
+interface ForeignTable {
   readonly operationId: string;
   readonly table: string;
   readonly endpoint: string;
-  readonly columns: readonly { readonly name: string; readonly type: ColumnType }[];
+  readonly columns: readonly Column[];
   readonly responsePath: string;
   readonly cursor: { readonly param: string; readonly path: string } | null;
-};
+}
 
 const CURSOR_PARAMS = ["cursor", "afterCursor"];
 const CURSOR_FIELDS = ["next_cursor", "nextCursor"];
@@ -23,45 +30,72 @@ const COLUMN_TYPES = new Map<string | null, ColumnType>([
   ["number", "double precision"],
 ]);
 
-function foreignTable({ operationId, path, parameters, json, listField }: Operation): ForeignTable[] {
-  const format = parameters.find((p) => p.in === "query" && p.name === "format" && p.enum.includes("json"));
-  if (format === undefined && json === undefined) return [];
-  const columns = [
-    ...parameters.filter((p) => p.in === "path"),
-    ...parameters.filter((p) => p.in === "query" && p !== format),
-  ];
-  const cursorParam = CURSOR_PARAMS.find((name) => parameters.some((p) => p.in === "query" && p.name === name));
+function cursorOf(parameters: readonly Parameter[], json: Operation["json"]): ForeignTable["cursor"] {
+  const cursorParam = CURSOR_PARAMS.find((name) =>
+    parameters.some((parameter) => parameter.in === "query" && parameter.name === name)
+  );
   const cursorField = CURSOR_FIELDS.find((name) => json?.properties.has(name) === true);
+  if (typeof cursorParam === "string" && typeof cursorField === "string") {
+    return { param: cursorParam, path: `/${cursorField}` };
+  }
+  return null;
+}
+
+function endpointOf(path: string, format: Parameter | undefined): string {
+  if (format) {
+    return `${path}?format=json`;
+  }
+  return path;
+}
+
+function responsePathOf(listField: string | null): string {
+  if (listField === null) {
+    return "";
+  }
+  return `/${listField}`;
+}
+
+function foreignTable({ operationId, path, parameters, json, listField }: Operation): ForeignTable[] {
+  const format = parameters.find((parameter) =>
+    parameter.in === "query" && parameter.name === "format" && parameter.enum.includes("json")
+  );
+  if (!format && !json) {
+    return [];
+  }
+  const columns = [
+    ...parameters.filter((parameter) => parameter.in === "path"),
+    ...parameters.filter((parameter) => parameter.in === "query" && parameter !== format),
+  ];
   return [{
+    columns: columns.map((column) => ({ name: column.name, type: COLUMN_TYPES.get(column.type) ?? "text" })),
+    cursor: cursorOf(parameters, json),
+    endpoint: endpointOf(path, format),
     operationId,
-    table: operationId.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
-    endpoint: format === undefined ? path : `${path}?format=json`,
-    columns: columns.map((p) => ({ name: p.name, type: COLUMN_TYPES.get(p.type) ?? "text" })),
-    responsePath: listField === null ? "" : `/${listField}`,
-    cursor: cursorParam === undefined || cursorField === undefined
-      ? null
-      : { param: cursorParam, path: `/${cursorField}` },
+    responsePath: responsePathOf(listField),
+    table: operationId.replaceAll(UPPERCASE, (letter) => `_${letter.toLowerCase()}`),
   }];
 }
 
-export function foreignTables(operations: readonly Operation[]): ForeignTable[] {
-  return operations.filter((op) => op.method === "GET").flatMap(foreignTable);
+function foreignTables(operations: readonly Operation[]): ForeignTable[] {
+  return operations.filter((op) => op.method === "GET").flatMap((op) => foreignTable(op));
 }
 
-function options(table: ForeignTable): [string, string][] {
-  return Object.entries({
-    endpoint: table.endpoint,
-    response_path: table.responsePath,
-    ...(table.cursor === null ? {} : { cursor_param: table.cursor.param, cursor_path: table.cursor.path }),
-  });
+function options({ cursor, endpoint, responsePath }: ForeignTable): Option[] {
+  const always: Option[] = [["endpoint", endpoint], ["response_path", responsePath]];
+  if (cursor === null) {
+    return always;
+  }
+  return [...always, ["cursor_param", cursor.param], ["cursor_path", cursor.path]];
+}
+
+function literals(values: readonly string[]): string {
+  return values.map((value) => literal(value)).join(", ");
 }
 
 function renderShape(table: ForeignTable): string {
   const columns = [...table.columns.map((column) => `${column.name} ${column.type}`), "attrs jsonb"];
   const settings = options(table).map(([name, value]) => `${name}=${value}`);
-  return `          (${literal(table.table)}, array[${settings.map(literal).join(", ")}], array[${
-    columns.map(literal).join(", ")
-  }])`;
+  return `          (${literal(table.table)}, array[${literals(settings)}], array[${literals(columns)}])`;
 }
 
 function renderTable(table: ForeignTable): string {
@@ -74,7 +108,7 @@ ${columns.map((column) => `  ${column}`).join(",\n")}
 `;
 }
 
-export function renderForeignTables(tables: readonly ForeignTable[]): string {
+function renderForeignTables(tables: readonly ForeignTable[]): string {
   return `set local lock_timeout = '5s';
 set local statement_timeout = '1min';
 
@@ -90,7 +124,7 @@ begin
     where c.relnamespace = 'xquik'::regnamespace and s.srvname = 'xquik_server'
       and not exists (
         select from (values
-${tables.map(renderShape).join(",\n")}
+${tables.map((table) => renderShape(table)).join(",\n")}
         ) wanted (name, options, columns)
         where (wanted.name, wanted.options, wanted.columns) = (
           c.relname::text,
@@ -110,3 +144,6 @@ end
 $$;
 ${tables.map((table) => `\n${renderTable(table)}`).join("")}`;
 }
+
+export { FOREIGN_TABLES_SUFFIX, foreignTables, renderForeignTables };
+export type { ForeignTable };
