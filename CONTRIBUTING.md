@@ -10,7 +10,7 @@ bin/check-local
 
 1. **Install the packages that bun.lock pins.** `bun install --frozen-lockfile` fails when `bun.lock` does not match `package.json`.
 2. **Suppression and exclusion ban.** `git grep` bans each pattern in `lint/banned-patterns.txt` in every file. The list covers every suppression comment, ignore entry and skipped test.
-3. **Exclusion keys in the Deno config.** `deno.json` has no `exclude` or `ignore` key, and its 1 `include` key adds lint rules.
+3. **Exclusion keys in the Deno configuration.** `deno.json` has no `exclude` or `ignore` key, and its 1 `include` key adds lint rules.
 4. **Fetch the pinned gitleaks, lychee and vale releases.** It stops when a download does not match its pinned sha256.
 5. **Secret scan of the full git history with gitleaks.** gitleaks reads every commit with its default rules, and no file in the repository can change them.
 6. **Link check of every tracked Markdown file with lychee.** lychee checks each local link and fragment. It skips web links, so an outage of another site cannot fail the checks.
@@ -25,7 +25,7 @@ bin/check-local
 15. **Type coverage and floating promises.** `scripts/type_coverage.ts` fails when the type of any value contains `any`. It also fails when a statement leaves a promise, a voided promise or an array of promises that no code awaits.
 16. **SQL lint.** squawk assumes a transaction, except in a file with `create index concurrently`. `supabase migration up` runs that statement alone.
 17. **Migrations on main stay unchanged.** `git diff` fails when a branch edits, renames or deletes a migration on `origin/main`, or replaces it with a symbolic link. A database may have applied that migration. Put each schema change in a new migration.
-18. **Dependency audit of the Deno and Bun lockfiles.** `deno audit` and `bun audit` fail on any known vulnerability in `deno.lock` or `bun.lock`.
+18. **Dependency audit of the Deno and Bun lock files.** `deno audit` and `bun audit` fail on any known vulnerability in `deno.lock` or `bun.lock`.
 19. **Tests with 100% line, branch and function coverage.** Every test must run and pass, with no ignored test or step. The tests must run every line, branch and function of every tracked TypeScript source file, and the coverage report must measure no other file. The SQL tests apply the migrations with `supabase migration up`. They fail on any Supabase advisor finding at any level, and when `deno task types` would change `supabase/functions/_shared/database.types.ts`. They also run every pgTAP test in `supabase/tests` with pgTAP 1.3.4 from PGXN. They fail on a failed, skipped or `todo` test. They also fail when a file runs more or fewer tests than its plan. `lint/banned-patterns.txt` bans `skip`, `todo`, `todo_start` and `no_plan` calls.
 20. **Stack test on the pinned Supabase images without Docker.** `bin/check-stack` runs the tests in `tests/stack/`, as [Stack tests](#stack-tests) describes.
 21. **Static analysis with the CodeQL security-extended queries.** CodeQL must read every tracked TypeScript file, and it fails on any result.
