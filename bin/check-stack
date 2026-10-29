@@ -186,7 +186,7 @@ start_postgres() {
   psql=("${bin}/psql" -X -q -v ON_ERROR_STOP=1 "postgresql://supabase_admin:${password}@127.0.0.1:${db_port}/postgres")
   "${psql[@]}" -c "alter user postgres with password '${password}'" \
     -c "alter user authenticator with password '${password}'"
-  psql[-1]="postgresql://postgres:${password}@127.0.0.1:${db_port}/postgres"
+  psql[-1]="${db_url}"
   "${psql[@]}" -v value="${XQUIK_API_KEY}" <<<"select vault.create_secret(:'value', 'xquik_api_key');" >/dev/null
   for file in supabase/migrations/*.sql; do
     "${psql[@]}" -f "${file}" >/dev/null
@@ -230,7 +230,7 @@ start_edge_runtime() {
     XQUIK_API_KEY="${XQUIK_API_KEY}" XQUIK_WEBHOOK_SECRET="${XQUIK_WEBHOOK_SECRET}" \
     SUPABASE_URL="http://127.0.0.1:${api_port}" SUPABASE_ANON_KEY="${anon_key}" \
     SUPABASE_SERVICE_ROLE_KEY="${service_role_key}" \
-    SUPABASE_DB_URL="postgresql://postgres:${password}@127.0.0.1:${db_port}/postgres" \
+    SUPABASE_DB_URL="${db_url}" \
     SUPABASE_INTERNAL_PUBLISHABLE_KEY="${publishable_key}" SUPABASE_INTERNAL_SECRET_KEY="${secret_key}" \
     SUPABASE_INTERNAL_JWT_SECRET="${jwt_secret}" SUPABASE_JWKS="${jwks}" SUPABASE_INTERNAL_HOST_PORT="${api_port}" \
     SUPABASE_INTERNAL_FUNCTIONS_CONFIG="${functions}" \
@@ -248,6 +248,7 @@ fill_cache
 report "Cache ready"
 pick_ports
 db_port="${ports[0]}"
+db_url="postgresql://postgres:${password}@127.0.0.1:${db_port}/postgres"
 rest_port="${ports[1]}"
 rest_admin_port="${ports[2]}"
 functions_port="${ports[3]}"
@@ -268,7 +269,7 @@ report "Stack ready"
 mkdir "${run}/cli"
 cat >"${run}/cli/supabase" <<CLI
 #!/bin/sh
-echo 'DB_URL="postgresql://postgres:${password}@127.0.0.1:${db_port}/postgres"'
+echo 'DB_URL="${db_url}"'
 echo 'FUNCTIONS_URL="http://127.0.0.1:${api_port}/functions/v1"'
 CLI
 chmod +x "${run}/cli/supabase"
