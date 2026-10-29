@@ -44,10 +44,12 @@ function storeOf(supabase: SupabaseClient<Database>): DeliveryStore {
   };
 }
 
-export default {
+const xquikWebhook = {
   fetch: withSupabase<Database>(
-    { auth: "none" },
+    { auth: "none", cors: "disabled" },
     async (request, { supabaseAdmin }) =>
       await handleDelivery(request, { now: Date.now, secrets, store: storeOf(supabaseAdmin) }),
   ),
 };
+
+export default xquikWebhook;

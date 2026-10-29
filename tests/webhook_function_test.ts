@@ -3,6 +3,7 @@ import { assert, assertEquals } from "@std/assert";
 import parseJson from "@shared/json.ts";
 
 const SECRET_KEY = "sb_secret_webhook_test";
+const BACKUP_KEY = "sb_secret_webhook_backup";
 const PUBLISHABLE_KEY = "sb_publishable_webhook_test";
 const STORE_DOWN = "store-down";
 const BARE_EVENT = { eventType: "tweet.new", occurredAt: "2026-10-28T19:00:00Z", streamEventId: "9002" };
@@ -114,7 +115,7 @@ async function loadFunction(supabaseUrl: string): Promise<(request: Request) => 
   Deno.env.set("XQUIK_WEBHOOK_SECRET", SECRET);
   Deno.env.set("SUPABASE_URL", supabaseUrl);
   Deno.env.set("SUPABASE_PUBLISHABLE_KEYS", JSON.stringify({ default: PUBLISHABLE_KEY }));
-  Deno.env.set("SUPABASE_SECRET_KEYS", JSON.stringify({ default: SECRET_KEY }));
+  Deno.env.set("SUPABASE_SECRET_KEYS", JSON.stringify({ backup: BACKUP_KEY, default: SECRET_KEY }));
   const { default: webhook } = await import("@/supabase/functions/xquik-webhook/index.ts");
   return async (request) => await webhook.fetch(request);
 }
@@ -182,6 +183,7 @@ Deno.test("the xquik-webhook function stores each event once through PostgREST w
       signedPost(event, STORE_DOWN),
       signedPost(sampleEvent("tweet.new", { streamEventId: STORE_DOWN })),
       Promise.resolve(new Request("http://localhost/functions/v1/xquik-webhook")),
+      Promise.resolve(new Request("http://localhost/functions/v1/xquik-webhook", { method: "OPTIONS" })),
       signedPost(BARE_EVENT),
     ]);
     assertEquals(await answersInOrder(handle, requests), [
@@ -191,6 +193,7 @@ Deno.test("the xquik-webhook function stores each event once through PostgREST w
       "200 Received the test alert.",
       "503 Could not store the delivery. Xquik will retry it.",
       "503 Could not store the delivery. Xquik will retry it.",
+      "405 Send deliveries with POST.",
       "405 Send deliveries with POST.",
       "200 Stored the event.",
     ]);
