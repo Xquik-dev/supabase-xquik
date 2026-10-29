@@ -265,9 +265,14 @@ start_postgrest
 start_gateway
 start_edge_runtime
 report "Stack ready"
-DB_URL="postgresql://postgres:${password}@127.0.0.1:${db_port}/postgres" \
-  FUNCTIONS_URL="http://127.0.0.1:${api_port}/functions/v1" XQUIK_STACK_HOST=127.0.0.1 \
-  XQUIK_WEBHOOK_SECRET="${XQUIK_WEBHOOK_SECRET}" NO_COLOR=1 \
+mkdir "${run}/cli"
+cat >"${run}/cli/supabase" <<CLI
+#!/bin/sh
+echo 'DB_URL="postgresql://postgres:${password}@127.0.0.1:${db_port}/postgres"'
+echo 'FUNCTIONS_URL="http://127.0.0.1:${api_port}/functions/v1"'
+CLI
+chmod +x "${run}/cli/supabase"
+PATH="${run}/cli:${PATH}" XQUIK_STACK_HOST=127.0.0.1 XQUIK_WEBHOOK_SECRET="${XQUIK_WEBHOOK_SECRET}" NO_COLOR=1 \
   "${deno}" test --allow-all tests/stack/ 2>&1 | tee "${run}/stack.log"
 totals="$(grep -E '^ok \| ' "${run}/stack.log" | tail -n 1)"
 [[ "${totals}" != *" ignored"* ]] || {

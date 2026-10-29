@@ -2,7 +2,6 @@ import { equivalents, plan } from "./mutants.ts";
 import { runMutants, score, summary } from "./mutation.ts";
 import parseJson from "@shared/json.ts";
 
-const CORES_PER_WORKER = 2;
 const NONE = 0;
 const EXIT_FAILURE = 1;
 const encoder = new TextEncoder();
@@ -18,8 +17,7 @@ if (stale.length > NONE) {
 }
 const testFiles = [...Deno.readDirSync("tests")].map(({ name }) => `tests/${name}`);
 const tests = testFiles.filter((name) => name.endsWith("_test.ts")).toSorted();
-const workers = Math.floor(navigator.hardwareConcurrency / CORES_PER_WORKER);
-const results = await runMutants(Deno.cwd(), mutants, tests, workers);
+const results = await runMutants(Deno.cwd(), mutants, tests, navigator.hardwareConcurrency);
 await Deno.stdout.write(encoder.encode(`${summary(results, equivalent)}\n`));
 if (!(score(results) >= Number(minimum))) {
   Deno.exitCode = EXIT_FAILURE;

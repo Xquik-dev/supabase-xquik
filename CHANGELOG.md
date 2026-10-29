@@ -4,6 +4,7 @@
 
 - Run the stack tests in `bin/check-local` on the pinned Supabase images,
   without Docker.
+- Run 1 mutation worker per CPU thread instead of 1 per 2 threads.
 - Add the Supabase project with the Xquik operation registry, SQL functions and
   cron jobs.
 - Add the `xquik-webhook` Edge Function that checks signatures and stores each

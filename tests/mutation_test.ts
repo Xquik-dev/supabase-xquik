@@ -56,9 +56,9 @@ const UNLISTED_TEST = `Deno.test("runs only when deno test gets no test to run",
 });
 `;
 
-const WORKERS_TEST = `Deno.test("runs in 1 of half as many copies as the machine has threads", () => {
+const WORKERS_TEST = `Deno.test("runs in 1 of as many copies as the machine has threads", () => {
   const copies = [...Deno.readDirSync("..")].filter(({ name }) => /^\\d+$/.test(name)).length;
-  if (copies !== Math.max(1, Math.floor(navigator.hardwareConcurrency / 2))) throw new Error(\`\${copies} copies\`);
+  if (copies !== navigator.hardwareConcurrency) throw new Error(\`\${copies} copies\`);
 });
 `;
 
