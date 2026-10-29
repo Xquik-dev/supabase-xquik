@@ -160,7 +160,8 @@ Deno.test("runs first the test that caught the last mutant of the same file, wit
       await runMutants(root, mutantsOf("flags.ts", FLAGS), ["tests/a_test.ts", "tests/b_test.ts"], ONE_WORKER),
   );
   assertEquals(results.map(({ outcome }) => outcome), ["killed", "survived", "killed"]);
-  assertEquals((await Deno.readTextFile(log)).trim().split("\n"), ["a", "b", "a", "b", "b", "a", "b"]);
+  const order = await Deno.readTextFile(log);
+  assertEquals(order.trim().split("\n"), ["a", "b", "a", "b", "b", "a", "b"]);
   await Promise.all([Deno.remove(root, { recursive: true }), Deno.remove(log)]);
 });
 

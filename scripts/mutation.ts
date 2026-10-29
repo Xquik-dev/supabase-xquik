@@ -120,6 +120,13 @@ function killerFirst(tests: readonly Covered[], killer: string | undefined): rea
   return [...tests.filter(({ test }) => test === killer), ...tests.filter(({ test }) => test !== killer)];
 }
 
+function remember(killers: Map<string, string>, file: string, run: TestRun): void {
+  const killer = run.ran.at(LAST);
+  if (!run.passed && typeof killer === "string") {
+    killers.set(file, killer);
+  }
+}
+
 function mutantTimeoutMs(baselineMs: readonly number[]): number {
   return MINIMUM_TIMEOUT_MS + TIMEOUT_FACTOR * baselineMs.reduce((total, ms) => total + ms, NONE);
 }
@@ -158,10 +165,7 @@ async function runMutants(
       await Deno.writeTextFile(path, mutated);
       const run = await runTests(dir, chosen.map(({ test }) => test), mutantTimeoutMs(chosen.map(({ ms }) => ms)));
       await Deno.writeTextFile(path, original);
-      const killer = run.ran.at(LAST);
-      if (!run.passed && typeof killer === "string") {
-        killers.set(mutant.file, killer);
-      }
+      remember(killers, mutant.file, run);
       return { mutant, outcome: outcomeOf(run) };
     });
   } finally {
