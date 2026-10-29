@@ -35,6 +35,13 @@ function routedHeaders(request: Request, header: string, keys: Keys): Headers {
   return headers;
 }
 
+async function bodyOf(request: Request): Promise<ArrayBuffer | null> {
+  if (request.body === null) {
+    return null;
+  }
+  return await request.arrayBuffer();
+}
+
 async function forward(request: Request, { keys, routes }: GatewayConfig): Promise<Response> {
   const url = new URL(request.url);
   const matched = routes.find(({ prefix }) => url.pathname.startsWith(prefix)) ?? null;
@@ -42,11 +49,9 @@ async function forward(request: Request, { keys, routes }: GatewayConfig): Promi
     return new Response(null, { status: NOT_FOUND });
   }
   const headers = routedHeaders(request, matched.header, keys);
-  const init: RequestInit = { headers, method: request.method, redirect: "manual" };
-  if (request.body !== null) {
-    init.body = await request.arrayBuffer();
-  }
-  return await fetch(new URL(`${url.pathname.slice(matched.prefix.length)}${url.search}`, matched.upstream), init);
+  const body = await bodyOf(request);
+  const target = new URL(`${url.pathname.slice(matched.prefix.length)}${url.search}`, matched.upstream);
+  return await fetch(target, { body, headers, method: request.method, redirect: "manual" });
 }
 
 if (import.meta.main) {
