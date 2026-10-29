@@ -38,7 +38,7 @@ Checked on 2026-10-28. See each number with its date & source on [xquik.com/trus
 - A typed Xquik client for Edge Functions in `supabase/functions/_shared/xquik.ts`.
 - `xquik.call`, `xquik.rows`, `xquik.enqueue` & `xquik.schedule` for SQL, cron jobs & triggers.
 - Foreign tables in the `xquik` schema for public reads.
-- The `xquik-webhook` Edge Function. It checks each delivery's signature & stores each event once. It runs through `withSupabase` from `@supabase/server` and writes with the secret key named `default`, so it keeps working after you turn off the legacy API keys.
+- The `xquik-webhook` Edge Function. It checks each delivery's signature & stores each event once. It runs through `withSupabase` from `@supabase/server`. It writes with the secret key named `default`, so it keeps working after you turn off the legacy API keys.
 - Row level security on every regular table. Policies deny `anon` and `authenticated` each operation, and neither holds a grant, so only the service role reads them.
 
 ## Start everything with 1 command
