@@ -332,7 +332,7 @@ lint_type_aware() {
 
 run_check "bans" "Suppression and exclusion ban" \
   "Remove each suppression or exclusion listed above and fix what it hid." no_banned_patterns
-run_check "deno.json keys" "Exclusion keys in deno.json" "Remove the keys listed above." no_config_exclusions
+run_check "deno.json keys" "Exclusion keys in the Deno config" "Remove the keys listed above." no_config_exclusions
 run_check "" "Fetch the pinned gitleaks, lychee and vale releases" \
   "Check network access to github.com, then rerun." fetch_tools
 run_check "gitleaks" "Secret scan of the full git history with gitleaks" \
@@ -358,7 +358,7 @@ run_check "squawk" "SQL lint" "Fix the squawk findings above." lint_sql
 run_check "append-only migrations" "Migrations on main stay unchanged" \
   "A database may have applied each migration listed above. Restore it and put the change in a new migration." \
   git diff --exit-code --name-only --no-renames --diff-filter=DMT --merge-base origin/main -- supabase/migrations
-run_check "audit" "Dependency audit of deno.lock and bun.lock" \
+run_check "audit" "Dependency audit of the Deno and Bun lockfiles" \
   "Upgrade each package named above, then rerun." audit_dependencies
 run_check "tests" "Tests with 100% line, branch and function coverage" \
   "Fix the failing tests, run the ignored ones, or test the lines, branches and functions listed above." run_tests
